@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import type { ImmigrationProfile, LifecycleStage } from "../lib/profile";
 import type { PlanItem, PlanResult, Source } from "../lib/rules";
 
@@ -71,7 +71,10 @@ export default function Home() {
     }
   };
 
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refresh(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const notify = (message: string) => {
     setToast(message);

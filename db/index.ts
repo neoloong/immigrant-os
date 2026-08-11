@@ -3,7 +3,7 @@ import * as schema from "./schema";
 import { getRuntimeBindings } from "../lib/runtime-env";
 
 export function getDb() {
-  return drizzle(getRuntimeBindings().DB, { schema });
+  return drizzle(getRuntimeBindings().DB as Parameters<typeof drizzle>[0], { schema });
 }
 
 let initialization: Promise<void> | null = null;
@@ -59,7 +59,7 @@ export function ensureDatabase() {
         completed_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
       )`),
       d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS completed_actions_owner_key_idx ON completed_actions (owner, action_key)"),
-    ]).then(() => undefined).catch((error) => {
+    ]).then(() => undefined).catch((error: unknown) => {
       initialization = null;
       throw error;
     });
