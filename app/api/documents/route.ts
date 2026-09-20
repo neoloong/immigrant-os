@@ -28,7 +28,7 @@ export async function GET(request: Request) {
       return new Response(object.body, {
         headers: {
           "content-type": document.mimeType,
-          "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(document.filename)}`,
+          "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(document.filename).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16)}`)}`,
           "cache-control": "private, no-store",
         },
       });

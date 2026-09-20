@@ -5,7 +5,7 @@ export function ownerFromRequest(request: Request): string | null {
   if (email) return email;
 
   const hostname = new URL(request.url).hostname;
-  if (hostname === "terminal.local" || hostname === "localhost" || hostname === "127.0.0.1") {
+  if (import.meta.env.DEV && (hostname === "terminal.local" || hostname === "localhost" || hostname === "127.0.0.1")) {
     return "preview@immigrantos.local";
   }
 

@@ -36,7 +36,10 @@ export async function POST(request: Request) {
       formType: String(payload.formType ?? "").trim().slice(0, 30),
       nickname: String(payload.nickname ?? "").trim().slice(0, 80),
     };
-    await getDb().insert(trackedCases).values(item).onConflictDoNothing();
+    await getDb().insert(trackedCases).values(item).onConflictDoUpdate({
+      target: [trackedCases.owner, trackedCases.receiptNumber],
+      set: { formType: item.formType, nickname: item.nickname },
+    });
     const [saved] = await getDb().select().from(trackedCases)
       .where(and(eq(trackedCases.owner, owner), eq(trackedCases.receiptNumber, receiptNumber)))
       .limit(1);

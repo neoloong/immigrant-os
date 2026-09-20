@@ -45,7 +45,11 @@ const worker = {
       }, allowedWidths);
     }
 
-    return handler.fetch(request, env, ctx);
+    const response = await handler.fetch(request, env, ctx);
+    if (url.pathname.startsWith("/api/")) {
+      response.headers.set("cache-control", "private, no-store");
+    }
+    return response;
   },
 };
 
