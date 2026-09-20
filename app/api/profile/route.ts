@@ -21,9 +21,14 @@ export async function PUT(request: Request) {
   const owner = ownerFromRequest(request);
   if (!owner) return unauthorized();
 
+  let input;
+  try {
+    input = normalizeProfile((await request.json()) as Record<string, unknown>);
+  } catch (error) {
+    return Response.json({ error: error instanceof SyntaxError ? "Enter a valid profile." : error instanceof Error ? error.message : "Invalid profile." }, { status: 400 });
+  }
   try {
     await ensureDatabase();
-    const input = normalizeProfile((await request.json()) as Record<string, unknown>);
     const now = new Date().toISOString();
     const values = { ...input, owner, updatedAt: now };
     await getDb()
@@ -36,12 +41,10 @@ export async function PUT(request: Request) {
     const [profile] = await getDb().select().from(profiles).where(eq(profiles.owner, owner)).limit(1);
     return Response.json({ profile });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to save profile.";
-    return Response.json({ error: message }, { status: message.includes("table") ? 500 : 400 });
+    return databaseError(error);
   }
 }
 
-function databaseError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Database unavailable.";
-  return Response.json({ error: message }, { status: 500 });
+function databaseError(_error: unknown) {
+  return Response.json({ error: "Your workspace could not be saved or loaded. Please try again." }, { status: 500 });
 }

@@ -20,6 +20,7 @@ export type ImmigrationProfile = {
 };
 
 export function normalizeProfile(input: Record<string, unknown>): ImmigrationProfile {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Enter a valid profile.");
   const lifecycleStage = String(input.lifecycleStage ?? "").toUpperCase();
   if (!LIFECYCLE_STAGES.includes(lifecycleStage as LifecycleStage)) {
     throw new Error("Choose a supported immigration stage.");
@@ -49,7 +50,7 @@ function cleanText(value: unknown, max: number) {
 function cleanDate(value: unknown): string | null {
   const candidate = String(value ?? "").trim();
   if (!candidate) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate) || Number.isNaN(Date.parse(`${candidate}T00:00:00Z`))) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate) || Number.isNaN(Date.parse(`${candidate}T00:00:00Z`)) || new Date(`${candidate}T00:00:00Z`).toISOString().slice(0, 10) !== candidate) {
     throw new Error(`Invalid date: ${candidate}`);
   }
   return candidate;

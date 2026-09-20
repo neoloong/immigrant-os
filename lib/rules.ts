@@ -12,7 +12,7 @@ export type PlanItem = {
   description: string;
   dueDate: string | null;
   severity: "critical" | "important" | "planning" | "info";
-  confidence: "verified" | "preliminary" | "needs-review";
+  confidence: "needs-review" | "preliminary";
   basis: string[];
   source: Source;
   completed: boolean;
@@ -21,32 +21,27 @@ export type PlanItem = {
 export type PlanResult = {
   generatedAt: string;
   stageLabel: string;
-  coverage: "Verified" | "Beta";
+  coverage: "Beta";
   summary: string;
   items: PlanItem[];
   missingFields: string[];
 };
 
 const SOURCES = {
-  f1FinalRule: {
-    label: "DHS final rule: fixed admission periods for F, J and I",
-    url: "https://www.federalregister.gov/documents/2026/07/17/2026-14439/establishing-a-fixed-time-period-of-admission-and-an-extension-of-stay-procedure-for-nonimmigrant",
-    ruleVersion: "Published July 17, 2026 · effective September 15, 2026",
-  },
   opt: {
     label: "USCIS: Optional Practical Training for F-1 Students",
     url: "https://www.uscis.gov/working-in-the-united-states/students-and-exchange-visitors/optional-practical-training-opt-for-f-1-students",
-    ruleVersion: "Checked August 11, 2026",
+    ruleVersion: "Official reference · check current instructions",
   },
-  stemOpt: {
-    label: "USCIS: STEM OPT extension",
-    url: "https://www.uscis.gov/working-in-the-united-states/students-and-exchange-visitors/optional-practical-training-extension-for-stem-students-stem-opt",
-    ruleVersion: "Checked August 11, 2026",
+  ead: {
+    label: "USCIS: Employment Authorization",
+    url: "https://www.uscis.gov/i-765",
+    ruleVersion: "Official reference · check current instructions",
   },
   h1b: {
     label: "USCIS: H-1B Specialty Occupations",
     url: "https://www.uscis.gov/working-in-the-united-states/h-1b-specialty-occupations",
-    ruleVersion: "Checked August 11, 2026",
+    ruleVersion: "Official reference · check current instructions",
   },
   visaBulletin: {
     label: "Department of State: Visa Bulletin",
@@ -56,17 +51,17 @@ const SOURCES = {
   greenCard: {
     label: "USCIS: Green Card Processes and Procedures",
     url: "https://www.uscis.gov/green-card/green-card-processes-and-procedures",
-    ruleVersion: "Checked August 11, 2026",
+    ruleVersion: "Official reference · check current instructions",
   },
   i90: {
     label: "USCIS: Form I-90",
     url: "https://www.uscis.gov/i-90",
-    ruleVersion: "Checked August 11, 2026",
+    ruleVersion: "Official reference · check current instructions",
   },
   n400: {
     label: "USCIS: Form N-400",
     url: "https://www.uscis.gov/n-400",
-    ruleVersion: "Checked August 11, 2026",
+    ruleVersion: "Official reference · check current instructions",
   },
 };
 
@@ -76,25 +71,13 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
   const missingFields: string[] = [];
 
   const add = (item: Omit<PlanItem, "completed">) => {
-    items.push({ ...item, completed: completed.has(item.id) });
+    const id = `${item.id}:${item.dueDate ?? "review"}`;
+    items.push({ ...item, id, completed: completed.has(id) });
   };
 
   if (profile.lifecycleStage === "F1") {
     if (!profile.programEndDate) missingFields.push("Program end date from Form I-20");
     if (!profile.admissionBasis) missingFields.push("I-94 admission basis (D/S or fixed date)");
-
-    if (profile.admissionBasis === "DS_TRANSITION") {
-      add({
-        id: "f1-fixed-admission-transition",
-        title: "Review the September 15 F-1 admission-rule transition",
-        description: "DHS is replacing duration-of-status admissions with fixed admission periods. Transition rules depend on your I-94, location, program or EAD dates, and status on the effective date.",
-        dueDate: "2026-09-15",
-        severity: "critical",
-        confidence: "verified",
-        basis: ["I-94 shows D/S", "Rule effective September 15, 2026"],
-        source: SOURCES.f1FinalRule,
-      });
-    }
 
     if (profile.admissionBasis === "FIXED_DATE" && !profile.i94ExpirationDate) {
       missingFields.push("I-94 admit-until date");
@@ -107,50 +90,18 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
         description: "Treat this as a controlling date. Review any need for an extension of stay with your DSO or qualified counsel well before it arrives.",
         dueDate: profile.i94ExpirationDate,
         severity: "critical",
-        confidence: "verified",
+        confidence: "needs-review",
         basis: [`I-94 admit-until date: ${formatDate(profile.i94ExpirationDate)}`],
-        source: SOURCES.f1FinalRule,
+        source: SOURCES.opt,
       });
     }
 
     if (profile.programEndDate) {
-      const earliest = addDays(profile.programEndDate, -90);
-      const latestOffset = profile.admissionBasis === "FIXED_DATE" ? 30 : 60;
-      const latest = addDays(profile.programEndDate, latestOffset);
       add({
-        id: "f1-opt-earliest",
-        title: "Earliest post-completion OPT filing date",
-        description: "This is the beginning of the filing window calculated from your confirmed program end date. Your DSO recommendation and other requirements still apply.",
-        dueDate: earliest,
-        severity: "planning",
-        confidence: "verified",
-        basis: [`Program end: ${formatDate(profile.programEndDate)}`, "90 calendar days earlier"],
-        source: SOURCES.opt,
-      });
-      add({
-        id: "f1-opt-latest",
-        title: profile.admissionBasis === "FIXED_DATE" ? "Latest post-completion OPT filing date" : "Transition-cohort filing date to verify",
-        description: profile.admissionBasis === "FIXED_DATE"
-          ? "The 2026 final rule shortens the post-program filing and departure period to 30 days for fixed-date admissions. Do not wait until this date."
-          : "This 60-day date reflects the D/S transition framework. Because the 2026 rule has cohort-specific extension-of-stay provisions, verify the exact filing sequence with your DSO.",
-        dueDate: latest,
-        severity: "critical",
-        confidence: profile.admissionBasis === "FIXED_DATE" ? "verified" : "needs-review",
-        basis: [`Program end: ${formatDate(profile.programEndDate)}`, `${latestOffset} calendar days later`],
-        source: profile.admissionBasis === "FIXED_DATE" ? SOURCES.f1FinalRule : SOURCES.opt,
-      });
-    }
-
-    if (profile.eadEndDate && profile.statusSubtype === "STEM_OPT") {
-      add({
-        id: "f1-stem-opt-earliest",
-        title: "Earliest STEM OPT extension filing date",
-        description: "A qualifying F-1 student may file up to 90 days before the current OPT EAD expires. The employer, degree, I-983, and DSO requirements must also be satisfied.",
-        dueDate: addDays(profile.eadEndDate, -90),
-        severity: "important",
-        confidence: "verified",
-        basis: [`Current EAD ends: ${formatDate(profile.eadEndDate)}`, "90 calendar days earlier"],
-        source: SOURCES.stemOpt,
+        id: "f1-program-end", title: "I-20 program end date",
+        description: "Date you entered from your I-20. Ask your DSO to confirm any OPT application window and recommendation deadline; this tracker does not determine filing eligibility.",
+        dueDate: profile.programEndDate, severity: "important", confidence: "needs-review",
+        basis: [`Your I-20 date: ${formatDate(profile.programEndDate)}`], source: SOURCES.opt,
       });
     }
   }
@@ -174,7 +125,7 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
         description: "The visa stamp is an entry document; it is not a substitute for checking the authorized stay shown on the latest I-94 and approval records.",
         dueDate: profile.i94ExpirationDate,
         severity: "critical",
-        confidence: "verified",
+        confidence: "needs-review",
         basis: [`I-94 admit-until date: ${formatDate(profile.i94ExpirationDate)}`],
         source: SOURCES.h1b,
       });
@@ -201,7 +152,7 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
       description: "Keep the I-140, I-485, I-765, I-131, and dependent cases separate so a change in one does not hide another.",
       dueDate: null,
       severity: "planning",
-      confidence: "verified",
+      confidence: "needs-review",
       basis: ["Green-card journey selected"],
       source: SOURCES.greenCard,
     });
@@ -213,30 +164,29 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
 
     if (profile.greenCardExpirationDate) {
       add({
-        id: "lpr-i90-window",
-        title: "Green Card renewal window opens",
-        description: "USCIS permits an I-90 renewal when a 10-year card is expired or will expire within six months. Conditional residents use a different process.",
-        dueDate: addMonths(profile.greenCardExpirationDate, -6),
-        severity: "important",
-        confidence: "verified",
-        basis: [`Card expires: ${formatDate(profile.greenCardExpirationDate)}`, "Six calendar months earlier"],
-        source: SOURCES.i90,
+        id: "lpr-card-expiry", title: "Green Card expiration date",
+        description: "Date printed on your card. Review the correct renewal or removal-of-conditions process; card expiration alone does not determine your immigration status.",
+        dueDate: profile.greenCardExpirationDate, severity: "important", confidence: "needs-review",
+        basis: [`Your card date: ${formatDate(profile.greenCardExpirationDate)}`], source: SOURCES.i90,
       });
     }
-
     if (profile.greenCardSince) {
-      const years = profile.naturalizationBasis === "three_year" ? 3 : 5;
       add({
-        id: "lpr-n400-earliest",
-        title: "Potential earliest N-400 filing date",
-        description: `This calculator only applies the ${years}-year continuous-residence period and USCIS's 90-day early-filing rule. It does not verify physical presence, marital union, trips, taxes, good moral character, or other eligibility requirements.`,
-        dueDate: addDays(addYears(profile.greenCardSince, years), -90),
-        severity: "planning",
-        confidence: "preliminary",
-        basis: [`Resident since: ${formatDate(profile.greenCardSince)}`, `${years}-year basis`, "90 calendar days early"],
-        source: SOURCES.n400,
+        id: "lpr-n400-review", title: "Review naturalization eligibility with official guidance",
+        description: "Residence dates alone are not enough to determine eligibility or an earliest filing date. Review residence, travel and any spouse-based requirements before applying.",
+        dueDate: null, severity: "planning", confidence: "needs-review",
+        basis: [`Resident since: ${formatDate(profile.greenCardSince)}`], source: SOURCES.n400,
       });
     }
+  }
+
+  if (profile.eadEndDate) {
+    add({
+      id: "ead-expiry", title: "EAD expiration date",
+      description: "Date printed on your EAD. Any extension of work authorization depends on your category and circumstances; verify it separately.",
+      dueDate: profile.eadEndDate, severity: "important", confidence: "needs-review",
+      basis: [`Your EAD date: ${formatDate(profile.eadEndDate)}`], source: SOURCES.ead,
+    });
   }
 
   if (profile.passportExpirationDate) {
@@ -246,14 +196,15 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
       description: "Renewal timing and the effect on travel or admission can vary by country and status. Plan early and re-check travel documents before every trip.",
       dueDate: profile.passportExpirationDate,
       severity: "important",
-      confidence: "verified",
+      confidence: "needs-review",
       basis: [`Passport expiration: ${formatDate(profile.passportExpirationDate)}`],
-      source: profile.lifecycleStage === "F1" ? SOURCES.f1FinalRule : SOURCES.h1b,
+      source: profile.lifecycleStage === "F1" ? SOURCES.opt : SOURCES.h1b,
     });
   }
 
   items.sort((a, b) => {
     if (a.completed !== b.completed) return a.completed ? 1 : -1;
+    if (!a.dueDate && !b.dueDate) return 0;
     if (!a.dueDate) return 1;
     if (!b.dueDate) return -1;
     return a.dueDate.localeCompare(b.dueDate);
@@ -266,7 +217,7 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
     LPR: "Permanent resident",
     CITIZENSHIP: "Citizenship",
   };
-  const coverage = profile.lifecycleStage === "F1" || profile.lifecycleStage === "LPR" || profile.lifecycleStage === "CITIZENSHIP" ? "Verified" : "Beta";
+  const coverage = "Beta";
 
   return {
     generatedAt: new Date().toISOString(),
@@ -288,24 +239,12 @@ function iso(value: Date) {
   return value.toISOString().slice(0, 10);
 }
 
-function addDays(value: string, days: number) {
-  const result = date(value);
-  result.setUTCDate(result.getUTCDate() + days);
-  return iso(result);
-}
-
 function addMonths(value: string, months: number) {
   const original = date(value);
   const day = original.getUTCDate();
   const result = new Date(Date.UTC(original.getUTCFullYear(), original.getUTCMonth() + months, 1, 12));
   const lastDay = new Date(Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0, 12)).getUTCDate();
   result.setUTCDate(Math.min(day, lastDay));
-  return iso(result);
-}
-
-function addYears(value: string, years: number) {
-  const result = date(value);
-  result.setUTCFullYear(result.getUTCFullYear() + years);
   return iso(result);
 }
 
