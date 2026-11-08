@@ -52,6 +52,17 @@ export const trackedCases = sqliteTable(
   ],
 );
 
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    owner: text("owner").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("sessions_owner_idx").on(table.owner)],
+);
+
 export const completedActions = sqliteTable(
   "completed_actions",
   {

@@ -6,7 +6,7 @@ import type { ImmigrationProfile } from "../../../lib/profile";
 import { buildPlan } from "../../../lib/rules";
 
 export async function GET(request: Request) {
-  const owner = ownerFromRequest(request);
+  const owner = await ownerFromRequest(request);
   if (!owner) return unauthorized();
 
   try {

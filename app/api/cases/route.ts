@@ -6,7 +6,7 @@ import { ownerFromRequest, unauthorized } from "../../../lib/auth";
 const RECEIPT_PATTERN = /^[A-Z]{3}\d{10}$/;
 
 export async function GET(request: Request) {
-  const owner = ownerFromRequest(request);
+  const owner = await ownerFromRequest(request);
   if (!owner) return unauthorized();
   try {
     await ensureDatabase();
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const owner = ownerFromRequest(request);
+  const owner = await ownerFromRequest(request);
   if (!owner) return unauthorized();
   try {
     await ensureDatabase();
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const owner = ownerFromRequest(request);
+  const owner = await ownerFromRequest(request);
   if (!owner) return unauthorized();
   const id = new URL(request.url).searchParams.get("id") ?? "";
   if (!id) return Response.json({ error: "Case id is required." }, { status: 400 });
