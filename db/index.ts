@@ -59,6 +59,13 @@ export function ensureDatabase() {
         completed_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
       )`),
       d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS completed_actions_owner_key_idx ON completed_actions (owner, action_key)"),
+      d1.prepare(`CREATE TABLE IF NOT EXISTS sessions (
+        id text PRIMARY KEY NOT NULL,
+        owner text NOT NULL,
+        expires_at text NOT NULL,
+        created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+      )`),
+      d1.prepare("CREATE INDEX IF NOT EXISTS sessions_owner_idx ON sessions (owner)"),
     ]).then(() => undefined).catch((error: unknown) => {
       initialization = null;
       throw error;

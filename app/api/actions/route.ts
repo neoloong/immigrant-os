@@ -6,7 +6,7 @@ import type { ImmigrationProfile } from "../../../lib/profile";
 import { ownerFromRequest, unauthorized } from "../../../lib/auth";
 
 export async function POST(request: Request) {
-  const owner = ownerFromRequest(request);
+  const owner = await ownerFromRequest(request);
   if (!owner) return unauthorized();
 
   try {

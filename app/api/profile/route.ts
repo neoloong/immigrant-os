@@ -5,7 +5,7 @@ import { ownerFromRequest, unauthorized } from "../../../lib/auth";
 import { normalizeProfile } from "../../../lib/profile";
 
 export async function GET(request: Request) {
-  const owner = ownerFromRequest(request);
+  const owner = await ownerFromRequest(request);
   if (!owner) return unauthorized();
 
   try {
@@ -18,7 +18,7 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const owner = ownerFromRequest(request);
+  const owner = await ownerFromRequest(request);
   if (!owner) return unauthorized();
 
   let input;

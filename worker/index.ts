@@ -7,6 +7,8 @@ interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DB: D1BindingLike;
   BUCKET: R2BindingLike;
+  AUTH_MODE?: string;
+  SESSION_SECRET?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -32,6 +34,9 @@ const worker = {
     (globalThis as typeof globalThis & {
       __IMMIGRANT_SITE_BINDINGS__?: Pick<Env, "DB" | "BUCKET">;
     }).__IMMIGRANT_SITE_BINDINGS__ = { DB: env.DB, BUCKET: env.BUCKET };
+    (globalThis as typeof globalThis & {
+      __IMMIGRANT_AUTH_CONFIG__?: { authMode?: string; sessionSecret?: string };
+    }).__IMMIGRANT_AUTH_CONFIG__ = { authMode: env.AUTH_MODE, sessionSecret: env.SESSION_SECRET };
     const url = new URL(request.url);
 
     if (url.pathname === "/_vinext/image") {

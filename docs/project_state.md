@@ -2,7 +2,7 @@
 
 ## Active assignments
 
-None. Lightweight pilot implementation and independent Claude Pro/OpenCode Go read-only reviews completed. Sites remains owner-private.
+None. Auth hardening (session-mode identity) implemented and verified; assignment cleared. Sites remains owner-private.
 
 ## Validation (2026-09-20)
 
@@ -39,7 +39,15 @@ None. Lightweight pilot implementation and independent Claude Pro/OpenCode Go re
 
 ## Known gaps
 
-- External hosting requires verified sessions instead of trusting incoming identity headers.
+- External hosting requires a sign-in provider that issues signed sessions; the session mechanism and spoofed-header rejection are in place, but no independent IdP/login flow is wired up yet.
 - D1 migrations, R2 provisioning, backup/restore and user-isolation tests are needed for independent hosting.
 - Assistant replies are rule-based; OCR, real AI, scheduled notifications and live case-status integrations are not connected.
 - Real external-viewer login remains to be tested before opening the audience. Sites identity headers remain trusted only behind its managed dispatch.
+
+## Auth hardening (2026-09-21)
+
+- `lib/auth.ts` now supports two identity modes via `AUTH_MODE`: `dispatch` (default, preserves Sites behavior) and `session` (independent hosting).
+- In `session` mode the `oai-authenticated-user-email` header is ignored entirely, so spoofed headers are rejected; identity comes from an HMAC-SHA256 signed `immigrant_session` cookie backed by a new `sessions` table (owner, expiry).
+- `SESSION_SECRET` (>= 32 chars) is required for session mode; `worker/index.ts` injects `AUTH_MODE`/`SESSION_SECRET` from Worker env.
+- Added `tests/auth.test.mjs` covering spoof rejection, anonymous rejection, tampered signature, owner scoping, and expiry. `npm test` now runs 14 tests; `npx tsc --noEmit` and `npm run lint` clean (one pre-existing unused-param warning in `app/api/profile/route.ts`).
+- No deploy: Sites continues in the default `dispatch` mode.
