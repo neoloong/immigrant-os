@@ -2,7 +2,18 @@
 
 ## Active assignments
 
-None. Launch-prep documentation assignment completed and cleared. Sites remains owner-private.
+None. Content-gate closure finished and accepted 2026-11-09 (npm test 14/14, tsc clean); see docs/content-audit.md 2026-11-09 closure. Sites remains owner-private.
+
+## Content-gate closure work (2026-11-09)
+
+- Branch `content-gate-close` was already checked out at main `0a6d2c2` with a clean working tree. Codex was the sole writer for the five authorized files; assignment cleared after implementation and validation. No other agent/provider used.
+- Updated assistant scope/caveat wording, scoped the empty-plan heading, attached the existing N-400 URL beneath the naturalization selector, and gated F1 I-94 actions on fixed-date admission.
+- Current inventory: 30 rows — 13 sourced, 17 explicitly classified non-assertions, 0 remaining unsourced immigration assertions, 0 eligibility/filing determinations, 0 P0. Full 19-row dispositions and deferred source/routing work are in `docs/content-audit.md`.
+- Local `curl -sI https://www.uscis.gov/n-400`: HTTP 200; direct GET reviewed for the conditional labels/hint. Other existing USCIS URLs returned 200; the existing Visa Bulletin URL returned 403 and remains a live-verification limitation.
+- Node 22.22.0: `npm ci --no-audit --no-fund` passed; `npx tsc --noEmit` passed; eight one-off `buildPlan` assertions passed, including retained-date suppression for D/S. Build and artifact validation passed.
+- `npm test` exited 1: calendar and rendered HTML passed; auth/workspace suites could not start Miniflare (`listen EPERM: operation not permitted 127.0.0.1`), preventing their nested tests. Required full 14-test acceptance remains outstanding in a listener-capable environment; this is not reported as a passing test run.
+- Commit creation blocked: explicit-path `git add` failed to create `.git/index.lock` with `Operation not permitted`; `.git` is read-only in this session and approval escalation is unavailable. Five-file patch remains uncommitted on `content-gate-close` at `0a6d2c2`; no alternate checkout or branch was created.
+- No push, merge, deployment, audience/hosting change, schema/dependency change, or provider/billing change.
 
 ## Launch-prep documentation (2026-11-08)
 

@@ -1,6 +1,6 @@
 # Content audit inventory — 2026-11-08
 
-Audited source: `eb664836f0479fd8c1537876c6a56c8d5c06083a`. This run changes documentation only. No product wording or rules were changed, and no source URLs were added to the product.
+Historical inventory below: audited source `eb664836f0479fd8c1537876c6a56c8d5c06083a`. See **2026-11-09 closure** for current dispositions, code changes, and validation limits. The original run changed documentation only. No product wording or rules were changed, and no source URLs were added to the product.
 
 ## Scope and counting
 
@@ -89,3 +89,83 @@ Before describing the content as fully verified, review the broad source mapping
 [green-card]: https://www.uscis.gov/green-card/green-card-processes-and-procedures
 [i90]: https://www.uscis.gov/i-90
 [n400]: https://www.uscis.gov/n-400
+
+
+## 2026-11-09 closure
+
+Work based on main `0a6d2c2`, on `content-gate-close`. The historical tables above retain their original findings; this section supersedes their unsourced verdicts and the specifically corrected wording/gating flags.
+
+**Current inventory: 30 rows — 13 sourced, 17 non-assertions, 0 remaining unsourced immigration assertions, 0 eligibility/filing determinations, 0 P0.** The 11 previously sourced rows retain their official code-attached URLs; the two naturalization labels now share a verified N-400 hint immediately under their selector. The other 17 rows are explicitly classified below. “Sourced” retains the original provenance meaning; it does not certify every broad reference or establish a user's legal position. Full acceptance was completed by Muse in a non-sandbox shell on 2026-11-09 (see validation addendum below); live verification of the existing Visa Bulletin URL remains blocked by HTTP 403.
+
+### Disposition of all 19 previously unsourced rows
+
+| Row ID | Final state | Change / one-line rationale |
+| --- | --- | --- |
+| `answer:missing` | Non-assertion | Unchanged input request for missing saved-profile fields and an administrative description of recalculation; no filing decision. |
+| `answer:fallback` | Non-assertion | Reworded to “profile has the fields needed for the supported checks”; describes app inputs, retaining the referral to a DSO, employer counsel, or immigration attorney. |
+| `limitations` | Non-assertion | Administrative scope notice now says “General administrative information only; not legal advice and not an eligibility determination.” |
+| `error:empty-question` | Non-assertion | Unchanged input-validation message asking for a question. |
+| `error:no-profile` | Non-assertion | Unchanged setup requirement asking the user to save a profile. |
+| `error:unauthorized` | Non-assertion | Unchanged authentication requirement asking the user to sign in. |
+| `error:failure` | Non-assertion | Unchanged operational error reporting a failed request, not an immigration rule. |
+| `missingFields:F1-program` | Non-assertion | Unchanged input request naming the user's I-20 program-end field. |
+| `missingFields:F1-admission` | Non-assertion | Unchanged input request naming the user's I-94 admission-basis field. |
+| `missingFields:F1-fixed-date` | Non-assertion | Unchanged input request naming the user's I-94 date field when fixed-date admission is selected. |
+| `missingFields:H1B-date` | Non-assertion | Unchanged input request naming the user's most recent I-94 date field. |
+| `missingFields:GC-priority` | Non-assertion | Unchanged input request naming the user's priority-date field. |
+| `missingFields:resident-since` | Non-assertion | Unchanged input request naming the user's resident-since field. |
+| `missingFields:LPR-card` | Non-assertion | Unchanged input request naming the user's Green Card expiration field. |
+| `summary:missing` | Non-assertion | Unchanged UI count of missing app timeline inputs derived from the saved profile. |
+| `summary:open` | Non-assertion | Unchanged UI count of open supported-rule actions derived from the saved profile and completion records. |
+| `empty-plan` | Non-assertion | Heading now says “No open actions in the supported rules.”; the unchanged sub-copy scopes the zero count to this profile's supported rules. |
+| `five_year` | Sourced | Existing label now has an adjacent [USCIS Form N-400 requirements][n400] link, with conditions-apply and no-eligibility-determination wording. |
+| `three_year` | Sourced | Existing label shares the same adjacent [USCIS Form N-400 requirements][n400] link and conditional scope notice. |
+
+### Previously sourced rows corrected
+
+- `answer:relevant`: replaced “governing source” with “official source”; the action-opening instruction explicitly directs users to descriptions and caveats as well as inputs and confidence. Item descriptions remain available in the plan; titles alone do not convey those caveats. Source inheritance is unchanged.
+- `f1-i94-end`: now requires both `admissionBasis === "FIXED_DATE"` and a saved I-94 date. A retained date no longer surfaces this action after switching to `DS_TRANSITION` (D/S), or when admission basis is unset. Existing wording and official source remain unchanged; the broad OPT reference and categorical title still need review.
+- The other nine previously sourced rows retain their existing sources and wording. No new deadline, calculation, eligibility decision, or filing-date determination was introduced.
+
+### Live source evidence — 2026-11-09
+
+Executed from this machine before attaching the hint:
+
+```text
+$ curl -sI https://www.uscis.gov/n-400
+HTTP/2 200
+content-type: text/html; charset=utf-8
+content-language: en
+date: Mon, 09 Nov 2026 19:46:30 GMT
+exit 0
+```
+
+A repeat returned HTTP 200 at 19:47:05 GMT. A direct `curl -s https://www.uscis.gov/n-400` GET also returned the page: its introduction conditions use of the form on meeting eligibility requirements, and its “When to File” section identifies the five-year and married-to-a-U.S.-citizen three-year bases. This supports the existing shorthand labels plus the new conditional review hint; no filing calculation or timing language from that page was added to the product. The hint uses the exact N-400 URL already in `lib/rules.ts`, with an accessible `aria-describedby` connection to the selector.
+
+Additional direct `curl -sI` checks at 19:47:15 GMT returned HTTP 200 for the existing OPT, H-1B, I-765, I-90, and Green Card Processes URLs. The existing State Department Visa Bulletin URL returned **HTTP 403**; successful live verification of that URL is not claimed. Initial subprocess-batched checks and a GET with extra flags encountered DNS resolution failures; direct curl invocations produced the evidence above. The web-reader service also returned 403 for N-400, so the successful local curl response and GET were used. No replacement source URLs were invented or attached.
+
+### Validation and acceptance status
+
+- Environment: Node `v22.22.0`, npm `11.14.1`.
+- `npm ci --no-audit --no-fund`: exit 0, installed 504 packages; only existing dependency deprecation warnings. Lockfile unchanged.
+- `npm test`: **exit 1**. Production build and Sites Worker/hosting-manifest validation passed. TAP reported `tests 4`, `pass 2`, `fail 2`: calendar and rendered HTML passed; `tests/auth.test.mjs:7` and `tests/workspace.test.mjs:6` failed before their nested tests with `listen EPERM: operation not permitted 127.0.0.1`. This is an observed sandbox listener restriction, not a passing 14-test run. All 14 tests must still pass in a listener-capable environment before full acceptance.
+- `npx tsc --noEmit`: exit 0, no diagnostics.
+- Inspected all existing test files: there is no dedicated rules suite; workspace coverage exercises H1B through Miniflare, while calendar uses TypeScript transpilation. Kept tracked changes within the five-file allowlist and used the permitted one-off Node check, following the calendar test's `typescript.transpileModule` / data-URL import approach against the actual `buildPlan` implementation.
+- One-off `buildPlan` check: **exit 0; all 8 assertions passed**. Fixed-date plus saved date produces the F1 I-94 action with the same date; retained date with D/S produces none; retained date with unset basis produces none; fixed-date without a date produces none and requests the missing date; D/S does not request that fixed date; the F1 program-end action remains; H1B I-94 behavior remains unchanged. No persistent test file or dependency was added.
+- `git diff --check`: passed. Changes are confined to `lib/rules.ts`, `app/api/assistant/route.ts`, `app/page.tsx`, this audit, and `docs/project_state.md`.
+- Local commit attempted on `content-gate-close`, but explicit-path `git add` failed in the Codex sandbox session: `Unable to create '/Users/chao/Projects/immigrant-os/.git/index.lock': Operation not permitted`. That session exposes `.git` read-only and does not permit approval escalation. No commit was created there; the five-file patch remained in the working tree.
+- **Muse acceptance (2026-11-09, non-sandbox shell on `content-gate-close`): `npm test` exit 0 — 14/14 pass, 0 fail (production build + Sites Worker/hosting-manifest validation passed); `npx tsc --noEmit` exit 0.** The Miniflare EPERM failure above was specific to the Codex sandbox session; the same suite passes in a normal shell.
+
+### NOT done today — follow-up items
+
+These are explicitly deferred by the task brief; changing them needs separate source/content or product work:
+
+- H-1B six-month planning convention: source remapping/validation, including the existing H-4 coverage flag.
+- Visa Bulletin next-month convention and missing category/country profile fields; also recheck the existing URL from an environment where the site permits access.
+- `gc-case-receipts`: broad source mapping for the case-organization convention.
+- `lpr-card-expiry`: I-90 versus removal-of-conditions (I-751) source split.
+- `universal-passport-expiry`: broad immigration references versus country-specific passport guidance.
+- Assistant keyword routing: OPT still misses the F1 items, and the green-card branch still misses `lpr-card-expiry`.
+- Existing F1/H1B status-end wording and broad references beyond the requested F1 admission-basis gate; no legal judgment was attempted.
+
+No push, merge to main, deployment, audience change, hosting configuration, schema change, dependency addition, or provider/billing change was performed.

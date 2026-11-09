@@ -30,16 +30,16 @@ export async function POST(request: Request) {
     else if (/missing|document|upload/.test(normalized)) relevant = [];
 
     const answer = relevant.length
-      ? `Based on your saved ${plan.stageLabel} profile, ${relevant.map((item) => `${item.title}${item.dueDate ? ` is ${item.dueDate}` : ""}`).join("; ")}. Open each action to see the inputs, confidence level, and governing source.`
+      ? `Based on your saved ${plan.stageLabel} profile, ${relevant.map((item) => `${item.title}${item.dueDate ? ` is ${item.dueDate}` : ""}`).join("; ")}. Open each action to review its description and caveats, inputs, confidence level, and official source.`
       : plan.missingFields.length
         ? `I cannot calculate that reliably yet. Add: ${plan.missingFields.join(", ")}. I will recalculate the plan after you save the profile.`
-        : `Your ${plan.stageLabel} profile is complete enough for the supported checks. This assistant only answers from the deterministic plan today; questions requiring strategy or legal judgment should go to a DSO, employer counsel, or immigration attorney.`;
+        : `Your ${plan.stageLabel} profile has the fields needed for the supported checks. This assistant only answers from the deterministic plan today; questions requiring strategy or legal judgment should go to a DSO, employer counsel, or immigration attorney.`;
 
     const sources = Array.from(new Map(relevant.map((item) => [item.source.url, item.source])).values());
     return Response.json({
       answer,
       sources,
-      limitations: "General administrative information only; not legal advice or a complete eligibility determination.",
+      limitations: "General administrative information only; not legal advice and not an eligibility determination.",
     });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to answer." }, { status: 500 });
