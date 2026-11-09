@@ -83,7 +83,7 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
       missingFields.push("I-94 admit-until date");
     }
 
-    if (profile.i94ExpirationDate) {
+    if (profile.admissionBasis === "FIXED_DATE" && profile.i94ExpirationDate) {
       add({
         id: "f1-i94-end",
         title: "I-94 authorized admission period ends",
