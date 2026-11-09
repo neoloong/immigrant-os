@@ -2,7 +2,17 @@
 
 ## Active assignments
 
-None. Auth hardening (session-mode identity) implemented and verified; assignment cleared. Sites remains owner-private.
+None. Launch-prep documentation assignment completed and cleared. Sites remains owner-private.
+
+## Launch-prep documentation (2026-11-08)
+
+- Branch: `launch-prep-readme-audit`, based on main `eb664836f0479fd8c1537876c6a56c8d5c06083a`. The original checkout's Git metadata is read-only in the execution sandbox; the branch and commit are in an isolated local clone. Original main and tracked files remain untouched. No push, cloud account commands, provisioning, or deployment.
+- Replaced the starter README with current product features, privacy/disclaimer, local scripts, and a hosting-guide link. Added `docs/content-audit.md` and `docs/cloudflare-hosting.md`; product code/content is unchanged.
+- Audit: 18 checklist/assistant rows (11 sourced, 7 unsourced), plus 12 adjacent prompt/label rows (all unsourced). Overall: 30 rows, 11 sourced, 19 unsourced, 0 eligibility/filing determinations, 0 P0. Sourced means a code-attached official URL, not validation that every assertion is supported; broad citations and wording/routing gaps are flagged.
+- Node 22.22.0: `npm ci --offline --no-audit --no-fund` passed using a copied local npm cache after the initial registry attempt encountered restricted DNS and was interrupted. Lockfile unchanged.
+- `npm run build`: passed, including Sites artifact validation. `npx tsc --noEmit`: passed.
+- `npm test`: failed in this sandbox, with 2 top-level tests passing and 2 failing before their nested checks could run. `tests/auth.test.mjs:7` and `tests/workspace.test.mjs:6` cannot start Miniflare: `listen EPERM: operation not permitted 127.0.0.1`. Calendar and rendered HTML pass. Reproduced the same failure with `npm test` in an untouched archive of base `eb66483`; this is an environment restriction, not a documentation regression. A full passing test run remains required in an environment permitting local listeners.
+- Independent hosting still needs Access JWT-to-session login/logout integration, real Wrangler/Vite configuration, D1/R2 provisioning/migrations, backup/restore validation, and real two-account smoke tests. The new guide corrects the older operations subsection's secret/migration instructions without changing runtime behavior.
 
 ## Validation (2026-09-20)
 
