@@ -42,3 +42,14 @@ next-env.d.ts
 /outputs/
 /work/
 *.tsbuildinfo
+
+# Mobile signing credentials and local native build outputs
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
+/android/local.properties
+/android/.gradle/
+/android/**/build/
+/ios/**/DerivedData/
+/ios/**/xcuserdata/

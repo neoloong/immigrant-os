@@ -2,7 +2,16 @@
 
 ## Active assignments
 
-None. Access bridge rejection changes and local validation are complete; operator Miniflare and production validation remain below.
+None. Capacitor scaffold work is recorded below; dependency installation, native generation and device validation remain blocked.
+
+## Capacitor mobile scaffold (2026-11-09)
+
+- **Partial delivery:** `app-capacitor` starts at `independent-hosting` tip `6a7a629` in the isolated local clone `work/app-capacitor`. Creating the branch in the original checkout failed with `.git/index.lock: Operation not permitted`; that checkout remains unchanged on `independent-hosting`. Codex was the sole writer; no other agents/providers were invoked; assignment cleared.
+- Added HTTPS server-URL configuration for `https://immigrant-os.neoloong.workers.dev`, app name `Immigrant OS`, placeholder app ID `com.neoloong.immigrantos`, cleartext disabled, and a minimal packaging stub (no static app bundle). Added sync/open scripts, a one-time official tooling installation command, existing-favicon asset generation wiring, signing/build ignore rules, and `docs/mobile-app.md`.
+- Registry lookup failed with `ENOTFOUND registry.npmjs.org`; offline Capacitor install and both platform-add attempts failed with `ENOTCACHED`. Capacitor is not installed, no new dependencies or lockfile entries were fabricated, and neither native project nor generated native assets exist yet. `app:assets` prepares the favicon source but cannot start the missing official generator. Remaining package install, generation, sync and explicit-path commit commands are in the runbook.
+- Full Xcode, Android Studio, default Android SDK and Java runtime are absent. Only Apple Command Line Tools are selected; `xcodebuild -version` fails. Native compilation, signing, TestFlight/Play uploads and real-device auth/session checks are outstanding. Owner's active Apple team is Chao Wang / WV28UW2GZS; future Play registration is an owner step.
+- Node 22.22.0: `npm ci --offline --no-audit --no-fund` passed using a copy of the existing project cache. `npm test` completed its web build/artifact checks, then reported 15 passes and three Miniflare initialization failures (`listen EPERM: operation not permitted 127.0.0.1`). `npx --no-install tsc --noEmit`, script syntax check and `git diff --check` passed. Full tests must be rerun where local listeners are permitted, and all checks repeated after installing Capacitor.
+- Confirmed `lib/`, `app/`, `worker/`, production `wrangler.jsonc`, and `package-lock.json` are identical to base. No push, merge, Wrangler cloud command, deploy, audience change, sign-in, purchase or store submission.
 
 ## Access bridge rejection diagnostics (2026-11-09)
 

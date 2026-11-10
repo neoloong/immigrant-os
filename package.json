@@ -13,7 +13,12 @@
     "test": "npm run build && node --test tests/*.test.mjs",
     "validate:artifact": "node scripts/validate-artifact.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"
+    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
+    "app:install-tooling": "npm install --save-dev --save-exact @capacitor/core@8 @capacitor/cli@8 @capacitor/ios@8 @capacitor/android@8 @capacitor/assets@3",
+    "app:sync": "cap sync",
+    "app:ios": "cap open ios",
+    "app:android": "cap open android",
+    "app:assets": "node scripts/mobile-assets.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
