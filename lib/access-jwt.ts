@@ -107,7 +107,7 @@ async function signingKeys(issuer: string): Promise<SigningKey[]> {
   const pending = {
     issuer,
     promise: (async (): Promise<KeySet> => {
-      const response = await fetch(`${issuer}/cdn-cgi/access/certs`, { redirect: "error", signal: AbortSignal.timeout(5000) });
+      const response = await fetch(`${issuer}/cdn-cgi/access/certs`, { redirect: "manual", signal: AbortSignal.timeout(5000) });
       if (!response.ok) throw new Error("Access signing keys unavailable");
       const body = await response.json() as { keys?: SigningKey[] };
       if (!Array.isArray(body.keys) || !body.keys.every((key) => key && typeof key === "object")) throw new Error("Invalid Access key set");
