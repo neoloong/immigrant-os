@@ -25,7 +25,7 @@ test("Access validates JWTs before touching storage", async (t) => {
     assert.equal(response.headers.get("set-cookie"), null);
     const body = await response.json();
     if (status === 401) {
-      assert.deepEqual(body, { error: "A valid Cloudflare Access identity is required.", detail: reason });
+      assert.deepEqual(body, { error: "A valid Cloudflare Access identity is required." });
       assert.equal(errors.mock.callCount(), loggedBefore + 1);
       assert.deepEqual(errors.mock.calls.at(-1).arguments, [reason]);
     } else {
@@ -69,7 +69,7 @@ test("Access validates JWTs before touching storage", async (t) => {
     for (const token of ["not-a-jwt", "a.b.c.d", `${header}..${signature}`, `${header}.!.${signature}`, `${header}.${payload}.!`, "a".repeat(32_769)]) await reject(token, "bad_structure");
     await reject(`!.${payload}.${signature}`, "bad_header");
   });
-  await t.test("diagnostic details stay on the Access bridge and logs contain only the code", async () => {
+  await t.test("rejection bodies never expose diagnostic details and logs contain only the code", async () => {
     for (const path of ["/", "/api/profile", "/auth/access/", "/images/icon.png"]) {
       const response = await call(env, path);
       assert.equal(response.status, 401);
@@ -94,7 +94,7 @@ test("Access validates JWTs before touching storage", async (t) => {
     for (const cookie of ["CF_Authorization_extra=invalid", "cf_authorization=invalid", "CF_Authorization", "CF_Authorization="]) {
       const response = await call(env, "/auth/access", { cookie });
       assert.equal(response.status, 401);
-      assert.equal((await response.json()).detail, "no_token");
+      assert.deepEqual(await response.json(), { error: "A valid Cloudflare Access identity is required." });
     }
   });
   await t.test("assertion header wins over the cookie, including invalid or empty headers", async () => {
@@ -105,7 +105,7 @@ test("Access validates JWTs before touching storage", async (t) => {
     for (const [header, reason] of [["invalid", "bad_structure"], ["", "no_token"], [access.jwt({ aud: "wrong-app" }), "bad_claims"]]) {
       const rejected = await call(env, "/auth/access", { "Cf-Access-Jwt-Assertion": header, cookie: `CF_Authorization=${valid}` });
       assert.equal(rejected.status, 401);
-      assert.equal((await rejected.json()).detail, reason);
+      assert.deepEqual(await rejected.json(), { error: "A valid Cloudflare Access identity is required." });
       assert.deepEqual(errors.mock.calls.at(-1).arguments, [reason]);
     }
   });

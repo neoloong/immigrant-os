@@ -40,14 +40,10 @@ export async function handleAccessAuth(request: Request, env: AccessEnv): Promis
   }
   const identity = await verifyAccessIdentityDetailed(request, config);
   if (identity.reason !== "ok") {
-    // TEMP-DEBUG: remove before public launch. Log only the fixed reason code.
+    // Server-side log carries only the fixed reason code; the response
+    // body never exposes diagnostic details.
     console.error(identity.reason);
-    const message = "A valid Cloudflare Access identity is required.";
-    if (url.pathname === "/auth/access") {
-      // TEMP-DEBUG: remove before public launch.
-      return Response.json({ error: message, detail: identity.reason }, { status: 401, headers: PRIVATE_HEADERS });
-    }
-    return error(message, 401);
+    return error("A valid Cloudflare Access identity is required.", 401);
   }
   const email = identity.email;
 

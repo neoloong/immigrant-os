@@ -1,0 +1,11 @@
+{
+	"appId": "com.neoloong.immigrantos",
+	"appName": "Immigrant OS",
+	"webDir": "mobile/www",
+	"server": {
+		"url": "https://immigrant-os.neoloong.workers.dev",
+		"cleartext": false
+	},
+	"backgroundColor": "#f8f9f6",
+	"packageClassList": []
+}
