@@ -2,7 +2,18 @@
 
 ## Active assignments
 
-None. Access bridge rejection changes and local validation are complete; operator Miniflare and production validation remain below.
+None. Agent MCP implementation and available local validation are complete; operator Miniflare, UI/connector smoke checks and activation remain below.
+
+## Agent-native MCP layer (2026-11-09)
+
+- Local branch `agent-mcp` is based on the `independent-hosting` tip `83ac8c5` in `/Users/chao/Projects/immigrant-os/work/agent-mcp`. Creating a branch in the original checkout failed because its `.git` is read-only; the isolated local clone is writable. The original checkout is untouched. Codex was the sole writer; active assignment cleared. No other agent/provider or billing was used.
+- Added SHA-256-only personal tokens, 90-day expiry, read/write permissions, one-time token display/copy, metadata listing and owner-scoped revocation. Migration `0002_agent_tokens.sql` and fresh-database initialization cover the table and indexes.
+- Added dependency-free, stateless MCP Streamable HTTP JSON responses at `/mcp`, with six owner-scoped tools, strict argument keys, bearer authentication, origin checks and bounded request bodies. Profile/case persistence and plan loading are shared with the web routes. Read tokens cannot invoke write tools; documents expose metadata only. Existing web task titles/dates/sources remain the compliance boundary, with no new calculations or determinations.
+- Added Settings → Connect your agent, standalone public `/agents`, app-served `/llms.txt`, `docs/agent-prompt.md`, and operator instructions in `docs/agent-mcp.md`. MCP and token management are disabled unless the runtime flag is exactly `AGENT_MCP_ENABLED="true"`; committed Wrangler default is `"false"`. No Access bridge/policy or production binding changes.
+- `npm ci --offline --no-audit --no-fund --cache /Users/chao/Projects/immigrant-os/.sites-runtime/npm-cache` passed (the first offline attempt used an empty clone-local cache and failed ENOTCACHED). Build/artifact validation and `npx tsc --noEmit` passed. Lint passed with only the pre-existing `_error` warning.
+- Final `npm test`: 27 passing results, including all 12 new agent-suite results, and three existing Miniflare suite startup failures (`listen EPERM: operation not permitted 127.0.0.1`). New tests execute the built Worker against real in-memory SQLite through a D1-shaped adapter and apply all migrations; existing D1/R2 integration tests remain unchanged and required. A full green suite and visual Settings/real connector checks remain for the operator in an unrestricted environment. No tests were skipped or weakened.
+- Operator: review commit, complete tests/UI/connector smoke checks, back up/apply migrations, deploy with flag off, verify authorized exact-path MCP reachability through any upstream Access gate, then enable explicitly. Preserve the existing app audience and web protection. No push, merge, Wrangler cloud command, deployment or public-access change was performed.
+
 
 ## Access bridge rejection diagnostics (2026-11-09)
 

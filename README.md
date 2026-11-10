@@ -47,3 +47,7 @@ The build compiles the app and validates the Sites Worker artifact. `npm test` r
 ## Self-hosting
 
 The owner plans to move to independent Cloudflare hosting. Follow the ordered [Cloudflare hosting preparation guide](docs/cloudflare-hosting.md) for the missing configuration, Access email-PIN integration, D1 migrations, R2, and smoke tests. This repository is not ready for a direct public deploy: the session-verification primitives exist, but the login flow that issues sessions is still missing. A GitHub push does not deploy the current Site. See also [operations](docs/operations.md).
+
+## Agent connections
+
+The optional remote MCP endpoint is disabled by default. See [agent setup and operator activation](docs/agent-mcp.md), the public `/agents` guide, and the [starter prompt](docs/agent-prompt.md).

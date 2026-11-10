@@ -2,8 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { ensureDatabase, getDb } from "../../../db";
 import { trackedCases } from "../../../db/schema";
 import { ownerFromRequest, unauthorized } from "../../../lib/auth";
-
-const RECEIPT_PATTERN = /^[A-Z]{3}\d{10}$/;
+import { InvalidReceipt, saveCase } from "../../../lib/workspace";
 
 export async function GET(request: Request) {
   const owner = await ownerFromRequest(request);
@@ -25,26 +24,10 @@ export async function POST(request: Request) {
   try {
     await ensureDatabase();
     const payload = (await request.json()) as { receiptNumber?: string; formType?: string; nickname?: string };
-    const receiptNumber = String(payload.receiptNumber ?? "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-    if (!RECEIPT_PATTERN.test(receiptNumber)) {
-      return Response.json({ error: "Enter a 13-character USCIS receipt number (3 letters and 10 digits)." }, { status: 400 });
-    }
-    const item = {
-      id: crypto.randomUUID(),
-      owner,
-      receiptNumber,
-      formType: String(payload.formType ?? "").trim().slice(0, 30),
-      nickname: String(payload.nickname ?? "").trim().slice(0, 80),
-    };
-    await getDb().insert(trackedCases).values(item).onConflictDoUpdate({
-      target: [trackedCases.owner, trackedCases.receiptNumber],
-      set: { formType: item.formType, nickname: item.nickname },
-    });
-    const [saved] = await getDb().select().from(trackedCases)
-      .where(and(eq(trackedCases.owner, owner), eq(trackedCases.receiptNumber, receiptNumber)))
-      .limit(1);
+    const saved = await saveCase(owner, payload);
     return Response.json({ case: saved }, { status: 201 });
   } catch (error) {
+    if (error instanceof InvalidReceipt) return Response.json({ error: error.message }, { status: 400 });
     return failure(error);
   }
 }
