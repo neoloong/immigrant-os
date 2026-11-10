@@ -2,7 +2,19 @@
 
 ## Active assignments
 
-None. Content-gate closure finished and accepted 2026-11-09 (npm test 14/14, tsc clean); see docs/content-audit.md 2026-11-09 closure. Sites remains owner-private.
+None. Independent-hosting implementation is complete on its isolated local branch; operator validation/deployment steps remain below.
+
+## Independent Cloudflare hosting implementation (2026-11-09)
+
+- Branch `independent-hosting` starts at main `35c8e70834754d41c386db50c37f9166eac3f7e2`. The original checkout's Git metadata is read-only in the sandbox (`git switch` failed with `index.lock: Operation not permitted`), so the branch/commit are in `/Users/chao/Projects/immigrant-os/work/independent-hosting`. Original main and tracked files are unchanged. Codex was the sole writer; no agents or paid providers were invoked. Assignment cleared after implementation/review.
+- Root `wrangler.jsonc` uses Worker `immigrant-os`, account `8fba78f3e5f52d302a5482370c61c15c`, D1 `immigrant-os-db` / `b9fe7d41-8f74-49cd-9e5b-dacf60ca9f7a`, and R2 `immigrant-os-files`. Vite reads it with `configPath`; Sites/vinext packaging and Vite environment settings remain. Initial routes are empty; workers.dev and preview URLs are disabled.
+- Access JWT verification uses RS256, team JWKS, issuer/audience/expiry/not-before checks, and verified normalized email. `GET /auth/access` reuses existing D1/HMAC sessions. Protected requests require the Access email and session owner to agree; identity switches revoke the old session. Root visits bootstrap sign-in; login/error links and POST logout are wired. Missing Access configuration disables the bridge with 503; plain email headers never substitute for a JWT.
+- `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are runtime non-secret settings to be supplied by the operator. `SESSION_SECRET` remains a Worker secret. `.dev.vars*` is now ignored; no dependencies, migration SQL, or lockfile changes.
+- Node 22.22.0: offline `npm ci` from the existing local cache passed; `npm run build` and generated-config inspection passed; `npx tsc --noEmit` passed; lint passed with the pre-existing `_error` warning in `app/api/profile/route.ts`.
+- Final `npm test` exited 1: 12 passing results, including all nine Access validation/bootstrap checks, plus three Miniflare suite initialization failures (`listen EPERM: operation not permitted 127.0.0.1`). D1-backed bridge/session creation, owner isolation, and workspace nested checks remain for the operator outside the sandbox. No tests were weakened or skipped.
+- No Wrangler command (including dry run), push, merge, deployment, resource provisioning, or audience change. Existing resource identifiers were supplied by the operator and were not remotely inspected.
+- **Merge/cutover constraint:** this branch's build selects session auth and independent Cloudflare bindings, so publishing it as the current Sites app can break dispatch sign-in/storage. Keep Sites on main until the operator chooses merge/deployment timing. Remaining Access configuration, remote migrations, secret/deploy commands, two-account smoke tests, and backup/restore checks are in `docs/cloudflare-hosting.md`.
+
 
 ## Content-gate closure work (2026-11-09)
 
@@ -60,8 +72,8 @@ None. Content-gate closure finished and accepted 2026-11-09 (npm test 14/14, tsc
 
 ## Known gaps
 
-- External hosting requires a sign-in provider that issues signed sessions; the session mechanism and spoofed-header rejection are in place, but no independent IdP/login flow is wired up yet.
-- D1 migrations, R2 provisioning, backup/restore and user-isolation tests are needed for independent hosting.
+- The independent-hosting branch now implements Access-to-session login/logout; full Miniflare validation and real Access login/isolation smoke tests remain outside this sandbox.
+- Independent D1/R2 resources are operator-provisioned; remote migration verification, private-bucket verification, backup/restore and real user-isolation tests remain.
 - Assistant replies are rule-based; OCR, real AI, scheduled notifications and live case-status integrations are not connected.
 - Real external-viewer login remains to be tested before opening the audience. Sites identity headers remain trusted only behind its managed dispatch.
 

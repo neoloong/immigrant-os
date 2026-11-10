@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "immigrant-os",
+  "account_id": "8fba78f3e5f52d302a5482370c61c15c",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [],
+  "assets": { "binding": "ASSETS" },
+  "images": { "binding": "IMAGES" },
+  "vars": { "AUTH_MODE": "session" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "immigrant-os-db",
+      "database_id": "b9fe7d41-8f74-49cd-9e5b-dacf60ca9f7a",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "BUCKET", "bucket_name": "immigrant-os-files" }
+  ]
+}

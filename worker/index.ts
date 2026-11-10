@@ -2,8 +2,10 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import type { D1BindingLike, R2BindingLike } from "../lib/runtime-env";
+import { handleAccessAuth } from "../lib/access-auth";
+import type { AccessEnv } from "../lib/access-jwt";
 
-interface Env {
+interface Env extends AccessEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DB: D1BindingLike;
   BUCKET: R2BindingLike;
@@ -38,6 +40,9 @@ const worker = {
       __IMMIGRANT_AUTH_CONFIG__?: { authMode?: string; sessionSecret?: string };
     }).__IMMIGRANT_AUTH_CONFIG__ = { authMode: env.AUTH_MODE, sessionSecret: env.SESSION_SECRET };
     const url = new URL(request.url);
+
+    const authResponse = await handleAccessAuth(request, env);
+    if (authResponse) return authResponse;
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
