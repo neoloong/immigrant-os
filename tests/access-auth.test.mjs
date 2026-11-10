@@ -14,44 +14,100 @@ const call = (env, path = "/auth/access", headers = {}, method = "GET", body) =>
 test("Access validates JWTs before touching storage", async (t) => {
   const access = accessFixture(t);
   const env = { ...access.env, AUTH_MODE: "session", SESSION_SECRET: secret };
-  const reject = async (jwt, overrides = {}, status = 401) => {
+  const errors = t.mock.method(console, "error", () => {});
+  const reject = async (jwt, reason, overrides = {}, status = 401) => {
     const headers = { "Cf-Access-Authenticated-User-Email": "forged@example.test", "oai-authenticated-user-email": "forged@example.test" };
     if (jwt !== undefined) headers["Cf-Access-Jwt-Assertion"] = jwt;
+    const loggedBefore = errors.mock.callCount();
     const response = await call({ ...env, ...overrides }, "/auth/access", headers);
     assert.equal(response.status, status);
     assert.equal(response.headers.get("cache-control"), "private, no-store");
     assert.equal(response.headers.get("set-cookie"), null);
+    const body = await response.json();
+    if (status === 401) {
+      assert.deepEqual(body, { error: "A valid Cloudflare Access identity is required.", detail: reason });
+      assert.equal(errors.mock.callCount(), loggedBefore + 1);
+      assert.deepEqual(errors.mock.calls.at(-1).arguments, [reason]);
+    } else {
+      assert.equal(Object.hasOwn(body, "detail"), false);
+      assert.equal(errors.mock.callCount(), loggedBefore);
+    }
   };
-  await t.test("missing JWT rejects plain identity headers", () => reject(undefined));
+  await t.test("missing JWT rejects plain identity headers", () => reject(undefined, "no_token"));
   await t.test("unset configuration disables the bridge", async () => {
-    for (const key of ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "SESSION_SECRET"]) await reject(access.jwt(), { [key]: undefined }, 503);
-    await reject(undefined, { ACCESS_AUD: undefined }, 503);
-    await reject(access.jwt(), { ACCESS_TEAM_DOMAIN: "https://team.cloudflareaccess.com" }, 503);
-    await reject(access.jwt(), { AUTH_MODE: "dispatch" }, 503);
+    for (const key of ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "SESSION_SECRET"]) await reject(access.jwt(), undefined, { [key]: undefined }, 503);
+    await reject(undefined, undefined, { ACCESS_AUD: undefined }, 503);
+    await reject(access.jwt(), undefined, { ACCESS_TEAM_DOMAIN: "https://team.cloudflareaccess.com" }, 503);
+    await reject(access.jwt(), undefined, { AUTH_MODE: "dispatch" }, 503);
   });
   await t.test("JWKS failure fails closed", async () => {
     access.setAvailable(false);
-    await reject(access.jwt());
+    await reject(access.jwt(), "jwks_unavailable");
     access.setAvailable(true);
   });
   await t.test("bad signature is rejected", async () => {
     const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    await reject(access.jwt({}, {}, privateKey));
+    await reject(access.jwt({}, {}, privateKey), "bad_signature");
   });
   await t.test("wrong audience or issuer is rejected", async () => {
-    await reject(access.jwt({ aud: ["another-app"] }));
-    await reject(access.jwt({ iss: "https://another-team.cloudflareaccess.com" }));
+    await reject(access.jwt({ aud: ["another-app"] }), "bad_claims");
+    await reject(access.jwt({ iss: "https://another-team.cloudflareaccess.com" }), "bad_claims");
   });
   await t.test("expired, premature, absent, or malformed claims are rejected", async () => {
     for (const claims of [
       { exp: 0 }, { exp: undefined }, { exp: "9999999999" }, { nbf: Date.now() / 1000 + 3600 },
       { nbf: "0" }, { email: undefined }, { email: " " }, { email: ["owner@example.test"] },
       { aud: undefined }, { aud: [env.ACCESS_AUD, 123] }, { iss: undefined },
-    ]) await reject(access.jwt(claims));
+    ]) await reject(access.jwt(claims), Object.hasOwn(claims, "email") ? "no_email" : "bad_claims");
   });
   await t.test("algorithm confusion, unknown keys, and malformed tokens are rejected", async () => {
-    for (const header of [{ alg: "none" }, { alg: "HS256" }, { kid: "unknown" }, { crit: ["custom"] }]) await reject(access.jwt({}, header));
-    for (const token of ["", "not-a-jwt", "e30.e30.bad", "a.b.c.d"]) await reject(token);
+    for (const header of [{ alg: "none" }, { alg: "HS256" }, { kid: undefined }, { crit: ["custom"] }]) await reject(access.jwt({}, header), "bad_header");
+    await reject(access.jwt({}, { kid: "unknown" }), "key_mismatch");
+    await reject("", "no_token");
+    await reject("e30.e30.bad", "bad_header");
+    const [header, payload, signature] = access.jwt().split(".");
+    for (const token of ["not-a-jwt", "a.b.c.d", `${header}..${signature}`, `${header}.!.${signature}`, `${header}.${payload}.!`, "a".repeat(32_769)]) await reject(token, "bad_structure");
+    await reject(`!.${payload}.${signature}`, "bad_header");
+  });
+  await t.test("diagnostic details stay on the Access bridge and logs contain only the code", async () => {
+    for (const path of ["/", "/api/profile", "/auth/access/", "/images/icon.png"]) {
+      const response = await call(env, path);
+      assert.equal(response.status, 401);
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(await response.json(), { error: "A valid Cloudflare Access identity is required." });
+      assert.deepEqual(errors.mock.calls.at(-1).arguments, ["no_token"]);
+    }
+  });
+  await t.test("CF_Authorization cookie bootstraps when the assertion header is absent", async () => {
+    const jwt = access.jwt();
+    for (const cookie of [
+      `CF_Authorization=${jwt}`,
+      `other=has=equals; CF_Authorization_extra=invalid; CF_Authorization=${jwt}; last=value`,
+      `other=value;  CF_Authorization="${jwt}"; last=value`,
+    ]) {
+      const loggedBefore = errors.mock.callCount();
+      const response = await call(env, "/", { cookie });
+      assert.equal(response.status, 303);
+      assert.equal(response.headers.get("location"), "/auth/access");
+      assert.equal(errors.mock.callCount(), loggedBefore);
+    }
+    for (const cookie of ["CF_Authorization_extra=invalid", "cf_authorization=invalid", "CF_Authorization", "CF_Authorization="]) {
+      const response = await call(env, "/auth/access", { cookie });
+      assert.equal(response.status, 401);
+      assert.equal((await response.json()).detail, "no_token");
+    }
+  });
+  await t.test("assertion header wins over the cookie, including invalid or empty headers", async () => {
+    const valid = access.jwt();
+    const response = await call(env, "/", { "Cf-Access-Jwt-Assertion": valid, cookie: "CF_Authorization=invalid" });
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get("location"), "/auth/access");
+    for (const [header, reason] of [["invalid", "bad_structure"], ["", "no_token"], [access.jwt({ aud: "wrong-app" }), "bad_claims"]]) {
+      const rejected = await call(env, "/auth/access", { "Cf-Access-Jwt-Assertion": header, cookie: `CF_Authorization=${valid}` });
+      assert.equal(rejected.status, 401);
+      assert.equal((await rejected.json()).detail, reason);
+      assert.deepEqual(errors.mock.calls.at(-1).arguments, [reason]);
+    }
   });
   await t.test("only GET can bootstrap a session", async () => {
     const response = await call(env, "/auth/access", {}, "POST");

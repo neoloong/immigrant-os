@@ -2,7 +2,18 @@
 
 ## Active assignments
 
-None. Independent-hosting implementation is complete on its isolated local branch; operator validation/deployment steps remain below.
+None. Access bridge rejection changes and local validation are complete; operator Miniflare and production validation remain below.
+
+## Access bridge rejection diagnostics (2026-11-09)
+
+- Implemented on the existing `independent-hosting` checkout at `3e4f16a`. Codex was the sole writer for `lib/access-jwt.ts`, `lib/access-auth.ts`, `tests/access-auth.test.mjs`, and this state file; assignment cleared after implementation and validation.
+- Missing assertion headers now fall back to the exact `CF_Authorization` cookie. Present headers, including invalid/empty headers, remain authoritative. Cookie parsing handles surrounding whitespace, quoted values, and unrelated cookie values containing equals signs. Existing RS256, key selection, issuer, audience, expiry, not-before, and email checks remain enforced.
+- The detailed verifier returns a fixed reason code; the existing verifier retains its email-or-null interface. Temporary rejection logging emits only the code, and only `/auth/access` rejection responses expose `detail`. Both diagnostic locations are marked `TEMP-DEBUG: remove before public launch`.
+- `npm ci --offline --no-audit --no-fund`, `npm run build` (including artifact validation), and `npx tsc --noEmit` passed. `npm test` exited 1 with 15 passing results, including all 12 Access validation subtests, and three Miniflare suite initialization failures (`listen EPERM: operation not permitted 127.0.0.1`). Access storage/session, session auth, and workspace suites remain for the operator in a listener-capable environment; none were weakened or skipped.
+- Best-supported production hypothesis: a wrapper drops `Cf-Access-Jwt-Assertion` while `CF_Authorization` survives. The old verifier ignored cookies and immediately rejected missing assertions. This remains unconfirmed until production exercises the fallback or reports a reason code; JWKS, key, signature, and claim failures are now distinguishable.
+- Commit blocked: explicit-path `git add` failed to create `.git/index.lock` with `Operation not permitted`. Git metadata is read-only in this session and approval escalation is unavailable. The four-file change remains uncommitted on `independent-hosting` at `3e4f16a`; no alternate checkout or branch was created.
+- No push, merge, Wrangler cloud commands, deployment, audience change, or provider/billing change.
+
 
 ## Independent Cloudflare hosting implementation (2026-11-09)
 

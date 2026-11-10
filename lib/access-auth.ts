@@ -1,5 +1,5 @@
 import { getAuthConfig, issueSession, ownerFromRequest, revokeSession, sessionCookieFromRequest } from "./auth";
-import { accessConfig, verifyAccessIdentity, type AccessEnv } from "./access-jwt";
+import { accessConfig, verifyAccessIdentityDetailed, type AccessEnv } from "./access-jwt";
 
 const PRIVATE_HEADERS = { "cache-control": "private, no-store" };
 
@@ -38,8 +38,18 @@ export async function handleAccessAuth(request: Request, env: AccessEnv): Promis
   if (url.pathname === "/auth/access" && request.method !== "GET") {
     return new Response(null, { status: 405, headers: { ...PRIVATE_HEADERS, allow: "GET" } });
   }
-  const email = await verifyAccessIdentity(request, config);
-  if (!email) return error("A valid Cloudflare Access identity is required.", 401);
+  const identity = await verifyAccessIdentityDetailed(request, config);
+  if (identity.reason !== "ok") {
+    // TEMP-DEBUG: remove before public launch. Log only the fixed reason code.
+    console.error(identity.reason);
+    const message = "A valid Cloudflare Access identity is required.";
+    if (url.pathname === "/auth/access") {
+      // TEMP-DEBUG: remove before public launch.
+      return Response.json({ error: message, detail: identity.reason }, { status: 401, headers: PRIVATE_HEADERS });
+    }
+    return error(message, 401);
+  }
+  const email = identity.email;
 
   if (url.pathname === "/auth/access") {
     // Revoke a previous account's session before replacing its cookie.
