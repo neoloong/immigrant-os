@@ -3,9 +3,10 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { ImmigrationProfile, LifecycleStage } from "../lib/profile";
 import type { PlanItem, PlanResult, Source } from "../lib/rules";
+import AgentSettings from "./agent-settings";
 import { calendarFile } from "../lib/calendar";
 
-type View = "plan" | "documents" | "cases" | "assistant";
+type View = "plan" | "documents" | "cases" | "assistant" | "settings";
 type SavedDocument = { id: string; kind: string; filename: string; mimeType: string; sizeBytes: number; uploadedAt: string };
 type TrackedCase = { id: string; receiptNumber: string; formType: string; nickname: string; statusText: string; lastCheckedAt: string | null; createdAt: string };
 type ChatMessage = { role: "user" | "assistant"; text: string; sources?: Source[]; limitations?: string };
@@ -39,6 +40,7 @@ const NAV: { id: View; label: string; icon: string }[] = [
   { id: "documents", label: "Documents", icon: "file" },
   { id: "cases", label: "Cases", icon: "case" },
   { id: "assistant", label: "Assistant", icon: "spark" },
+  { id: "settings", label: "Settings", icon: "shield" },
 ];
 
 export default function Home() {
@@ -112,6 +114,7 @@ export default function Home() {
         {view === "documents" && <DocumentsView documents={documents} onChanged={async () => { await refresh(); }} notify={notify} />}
         {view === "cases" && <CasesView cases={cases} onChanged={async () => { await refresh(); }} notify={notify} />}
         {view === "assistant" && <AssistantView plan={plan} />}
+        {view === "settings" && <AgentSettings />}
       </section>
 
       <nav className="bottom-nav" aria-label="Mobile navigation">{NAV.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon name={item.icon} /><span>{item.label}</span></button>)}</nav>

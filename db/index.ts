@@ -66,6 +66,15 @@ export function ensureDatabase() {
         created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
       )`),
       d1.prepare("CREATE INDEX IF NOT EXISTS sessions_owner_idx ON sessions (owner)"),
+      d1.prepare(`CREATE TABLE IF NOT EXISTS agent_tokens (
+        id text PRIMARY KEY NOT NULL, owner text NOT NULL,
+        token_hash text NOT NULL, label text NOT NULL,
+        scopes text NOT NULL CHECK (scopes IN ('read', 'write')),
+        created_at text NOT NULL, expires_at text NOT NULL,
+        last_used_at text, revoked_at text
+      )`),
+      d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS agent_tokens_hash_idx ON agent_tokens (token_hash)"),
+      d1.prepare("CREATE INDEX IF NOT EXISTS agent_tokens_owner_idx ON agent_tokens (owner)"),
     ]).then(() => undefined).catch((error: unknown) => {
       initialization = null;
       throw error;

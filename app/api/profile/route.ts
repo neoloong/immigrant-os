@@ -1,6 +1,4 @@
-import { eq } from "drizzle-orm";
-import { ensureDatabase, getDb } from "../../../db";
-import { profiles } from "../../../db/schema";
+import { loadProfile, saveProfile } from "../../../lib/workspace";
 import { ownerFromRequest, unauthorized } from "../../../lib/auth";
 import { normalizeProfile } from "../../../lib/profile";
 
@@ -9,8 +7,7 @@ export async function GET(request: Request) {
   if (!owner) return unauthorized();
 
   try {
-    await ensureDatabase();
-    const [profile] = await getDb().select().from(profiles).where(eq(profiles.owner, owner)).limit(1);
+    const profile = await loadProfile(owner);
     return Response.json({ profile: profile ?? null });
   } catch (error) {
     return databaseError(error);
@@ -28,17 +25,7 @@ export async function PUT(request: Request) {
     return Response.json({ error: error instanceof SyntaxError ? "Enter a valid profile." : error instanceof Error ? error.message : "Invalid profile." }, { status: 400 });
   }
   try {
-    await ensureDatabase();
-    const now = new Date().toISOString();
-    const values = { ...input, owner, updatedAt: now };
-    await getDb()
-      .insert(profiles)
-      .values(values)
-      .onConflictDoUpdate({
-        target: profiles.owner,
-        set: { ...input, updatedAt: now },
-      });
-    const [profile] = await getDb().select().from(profiles).where(eq(profiles.owner, owner)).limit(1);
+    const profile = await saveProfile(owner, input);
     return Response.json({ profile });
   } catch (error) {
     return databaseError(error);
