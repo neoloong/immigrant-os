@@ -106,3 +106,4 @@ None. Agent MCP implementation and available local validation are complete; oper
 - `SESSION_SECRET` (>= 32 chars) is required for session mode; `worker/index.ts` injects `AUTH_MODE`/`SESSION_SECRET` from Worker env.
 - Added `tests/auth.test.mjs` covering spoof rejection, anonymous rejection, tampered signature, owner scoping, and expiry. `npm test` now runs 14 tests; `npx tsc --noEmit` and `npm run lint` clean (one pre-existing unused-param warning in `app/api/profile/route.ts`).
 - No deploy: Sites continues in the default `dispatch` mode.
+- 2026-11-10: [Reminders v1 email design](reminders-v1-design.md) completed; Codex assignment cleared; design only.
