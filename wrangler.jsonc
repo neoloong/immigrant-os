@@ -10,7 +10,7 @@
   "routes": [],
   "assets": { "binding": "ASSETS" },
   "images": { "binding": "IMAGES" },
-  "vars": { "AGENT_MCP_ENABLED": "false", "AUTH_MODE": "session", "ACCESS_TEAM_DOMAIN": "neoloong.cloudflareaccess.com", "ACCESS_AUD": "f9370250b15129d71bfdcc6ba3c495510fc96b40352d9f6086c92c4f8e92e714" },
+  "vars": { "AGENT_MCP_ENABLED": "true", "AUTH_MODE": "session", "ACCESS_TEAM_DOMAIN": "neoloong.cloudflareaccess.com", "ACCESS_AUD": "f9370250b15129d71bfdcc6ba3c495510fc96b40352d9f6086c92c4f8e92e714" },
   "d1_databases": [
     {
       "binding": "DB",
