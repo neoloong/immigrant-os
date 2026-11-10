@@ -27,6 +27,11 @@
     "react-dom": "19.2.6"
   },
   "devDependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "8.6.0",
+    "@capacitor/core": "8.6.0",
+    "@capacitor/ios": "8.6.0",
     "@cloudflare/vite-plugin": "1.37.1",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
