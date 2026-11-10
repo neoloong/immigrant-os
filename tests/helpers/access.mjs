@@ -12,7 +12,7 @@ export function accessFixture(t) {
   t.mock.method(globalThis, "fetch", async (input, options) => {
     if (String(input).startsWith(issuer)) {
       assert.equal(String(input), `${issuer}/cdn-cgi/access/certs`);
-      assert.equal(options.redirect, "error");
+      assert.equal(options.redirect, "manual");
       return available ? Response.json(jwks) : new Response("Unavailable", { status: 503 });
     }
     return originalFetch(input, options);
