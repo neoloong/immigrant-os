@@ -1,22 +1,33 @@
 # Independent Cloudflare hosting preparation
 
-Prepared 2026-11-08 against `eb664836f0479fd8c1537876c6a56c8d5c06083a`. **This is an ordered future provisioning runbook, not a deployment performed by this documentation change.** No account login, cloud provisioning, secret upload, or deployment was run. The current owner-private ChatGPT Site and its audience remain unchanged.
+Updated 2026-11-09 on `independent-hosting`, based on main `35c8e70`. The branch implements independent hosting configuration and Access-to-session authentication. **No Wrangler cloud command, deployment, push, or merge was performed.** The existing owner-private ChatGPT Site and its audience remain unchanged.
 
-## What exists and what is missing
+## Branch status and remaining operator work
 
-| Repository evidence | Consequence for independent hosting |
+The requested resources are already provisioned (operator-supplied identifiers; not remotely inspected):
+
+- Account: `8fba78f3e5f52d302a5482370c61c15c`
+- D1: `immigrant-os-db`, ID `b9fe7d41-8f74-49cd-9e5b-dacf60ca9f7a`, binding `DB`
+- Private R2: `immigrant-os-files`, binding `BUCKET`
+- Worker: `immigrant-os`
+
+The original checkout's `.git` is read-only in the execution sandbox. The implementation branch and commit are in the isolated local clone at `work/independent-hosting`; original `main` remains untouched. Run the commands below from that clone or from a checkout of its commit. Do not recreate the cloud resources.
+
+| Repository evidence | Independent deployment behavior |
 | --- | --- |
-| `package.json`: vinext 0.0.50, Cloudflare Vite plugin 1.37.1, Wrangler 4.92.0; `build` runs `node scripts/build.mjs` | Use the lockfile and repo build. There is no `deploy` npm script. |
-| `vite.config.ts`: inline `localBindingConfig`; `.openai/hosting.json`: `DB` and `BUCKET` | Bindings currently use the fake D1 ID `00000000-0000-4000-8000-000000000000`, `site-creator-d1`, and `site-creator-r2`. These are local/Sites settings, not provisioned resources in the owner's account. |
-| No tracked `wrangler.jsonc`, `wrangler.json`, or `wrangler.toml` | A production Wrangler configuration must be created and Vite must actually read it. Adding a file alone leaves the inline overrides in place. |
-| `worker/index.ts` | Worker entry; injects D1/R2 and auth config. The image route references `ASSETS` and `IMAGES`, which also need configuration if retained. API responses receive `private, no-store`. |
-| `lib/auth.ts` | Default dispatch mode trusts the Sites email header. Session mode ignores it and verifies a signed cookie against D1. `issueSession` and `revokeSession` exist, but no login/logout routes call them. |
-| `app/page.tsx::ErrorScreen`, `app/chatgpt-auth.ts` | Sign-in links/helpers target Sites-owned paths. They are not a working Cloudflare Access login integration. |
-| `drizzle.config.ts`, `drizzle/0000_new_maria_hill.sql`, `drizzle/0001_round_ted_forrester.sql` | SQL migrations exist. The first creates profiles/documents/cases/completions; the second creates sessions. No remote migration script is configured. |
-| `db/index.ts::ensureDatabase` | Creates tables/indexes inline on first use; does not record Wrangler migration history. Migrate a fresh database before any app traffic. |
-| `build/sites-vite-plugin.ts`, `scripts/validate-artifact.mjs` | Build copies Sites metadata/migrations and requires `dist/server/index.js` with `default.fetch`. Keep this packaging for the existing validation workflow. |
+| `wrangler.jsonc`, `vite.config.ts` | Real account/D1/R2 configuration, `AUTH_MODE=session`, assets/images bindings, `drizzle` migrations, empty routes, disabled default/preview URLs. Vite reads this file without inline binding overrides. |
+| `lib/access-jwt.ts`, `lib/access-auth.ts`, `worker/index.ts` | Validates Access JWTs, issues existing D1/HMAC sessions, checks Access identity against session owner, bootstraps at `/auth/access`, and revokes on logout. |
+| `lib/auth.ts` | Existing session signing, lookup, expiry, and revocation remain authoritative. Dispatch mode still exists for Sites; local preview identity bypass applies only to dispatch mode. |
+| `app/page.tsx` | Error-screen sign-in uses `/auth/login`; a POST sign-out form uses `/auth/logout`. Worker selects the login/logout destination for the runtime auth mode. The unused `app/chatgpt-auth.ts` remains a Sites helper. |
+| `drizzle/0000_new_maria_hill.sql`, `drizzle/0001_round_ted_forrester.sql` | Committed migrations create workspace tables and sessions. Apply to the fresh remote D1 before traffic. |
+| `db/index.ts::ensureDatabase` | Inline table initialization does not record Wrangler migration history. It is not a substitute for remote migrations. |
+| `build/sites-vite-plugin.ts`, `scripts/validate-artifact.mjs` | Existing Sites artifact packaging/validation remains in the build, but passing it does not establish Sites runtime compatibility. |
 
-This guide supersedes the **independent-hosting provisioning subsection** of [operations.md](operations.md): store the session secret with Wrangler secrets, apply committed SQL with an explicit remote target, and do not confuse inline schema creation with migrations. A runtime Drizzle migrator is not required for the Wrangler SQL migration path below.
+**Sites merge warning:** this branch replaces the Sites placeholder binding configuration with the owner's Cloudflare resources and selects session authentication. Rebuilding/publishing it as the existing Site could bind the wrong resources or reject Sites dispatch identity (503 without Access/secret settings; 401 without a verified Access JWT). Keep the current Sites deployment on main until the operator decides cutover timing or separates deployment configurations. A GitHub push does not deploy either host.
+
+Remaining sequence: configure Access and its two non-secret vars (steps 2–3); apply remote migrations (6); rerun checks outside the sandbox (7); deploy without routes, then install `SESSION_SECRET` (8); attach only the protected hostname and rebuild/deploy (9); complete synthetic two-account and recovery checks (10). The hostname, team domain, and audience are operator choices and have intentionally not been invented.
+
+This guide supersedes the **independent-hosting provisioning subsection** of [operations.md](operations.md): use Wrangler secrets for the session secret, apply committed SQL to an explicit remote target, and preserve the existing Site audience.
 
 ## Ordered provisioning checklist
 
@@ -30,40 +41,37 @@ This guide supersedes the **independent-hosting provisioning subsection** of [op
 
 ### 2. Set up the Access email-PIN gate before attaching a Worker hostname
 
-In the Cloudflare dashboard's **Zero Trust → Integrations → Identity providers**, add **One-time PIN**. Under **Access → Applications**, add a **Self-hosted** application for the exact planned hostname and all paths, including `/api/*` and the eventual session bootstrap route. Select One-time PIN as the allowed login method. Create an **Allow** policy listing only the owner's approved email addresses; begin with the owner and add pilot testers only when authorized. Do not use an Everyone allow rule or a Bypass rule. Record the application's audience tag and the team issuer domain for the server integration. Choose and record a session duration. See Cloudflare's [OTP setup](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/) and [self-hosted application setup](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/).
+In the Cloudflare dashboard's **Zero Trust → Integrations → Identity providers**, add **One-time PIN**. Under **Access → Applications**, add a **Self-hosted** application for the exact planned hostname and all paths, including `/api/*` and `/auth/*`. Select One-time PIN as the allowed login method. Create an **Allow** policy listing only the owner's approved email addresses; begin with the owner and add pilot testers only when authorized. Do not use an Everyone allow rule or a Bypass rule. Record the application's audience tag and the team issuer domain for the server integration. Choose and record a session duration. See Cloudflare's [OTP setup](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/) and [self-hosted application setup](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/).
 
-### 3. Implement the missing authentication integration — deployment blocker
+### 3. Configure the implemented Access session bridge
 
-**Stop before deploying the app until this separate implementation is reviewed and tested.** Access's `CF_Authorization` cookie is not the app's `immigrant_session` cookie. Merely turning on Access and choosing session mode leaves the current APIs returning 401.
+Access's `CF_Authorization` cookie is not the app's `immigrant_session` cookie. In session mode the Worker now handles:
 
-Required code work:
+- `GET /auth/access`: verify `Cf-Access-Jwt-Assertion` using RS256 and the team JWKS, exact issuer, matching application audience (string or array claim), expiry, optional not-before, and a usable email claim. Use only the normalized verified email. Missing/invalid JWTs return 401, with no plain-email-header fallback.
+- `GET /`: require a valid Access JWT and redirect to `/auth/access` if the app session is missing, expired, or belongs to a different owner. The bridge revokes the previous signed session, calls the existing `issueSession`, and redirects to `/` with a host-only `immigrant_session` cookie (`Secure; HttpOnly; SameSite=Lax; Path=/; Expires=...`).
+- Every routed protected request: require a valid Access JWT and a matching session owner. Missing/expired Access cannot be bypassed with a surviving app cookie. Mismatched identities revoke the old session and APIs return 401; they do not perform an operation under the previous identity.
+- `GET /auth/login`: select `/auth/access` in session mode, or the original Sites sign-in path in dispatch mode.
+- `POST /auth/logout`: reject explicitly cross-origin submissions, call `revokeSession`, clear the app cookie, and redirect to `/cdn-cgi/access/logout` to end Access login. Logout can clear an app session even if its Access JWT has expired. The successful workspace UI exposes the form. In dispatch mode the route redirects to Sites sign-out.
 
-- Validate `Cf-Access-Jwt-Assertion` on the server using the team's signing keys. Verify signature, permitted algorithm, issuer, application audience, expiry, and any not-before constraint; reject missing/invalid claims. Derive the normalized account email from verified claims, never a user-supplied email header. Cloudflare documents [JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/).
-- Connect verified identity to `issueSession` and set the app cookie with `Secure`, `HttpOnly`, `SameSite=Lax`, a host-only scope, `Path=/`, and the returned expiry. Enforce that the verified Access identity and session owner agree; prevent switching identities from retaining a previous account's session.
-- Require valid Access identity for every protected request, even if an app cookie survives longer. Add a real logout path that calls `revokeSession`, clears the app cookie, and ends the Access session. Replace the Sites-only login/error links for this independent deployment.
-- Wire the proposed Access configuration names below into Worker env/types and the validation code. They are not read by today's app. Cover identity switching, expiry/revocation, invalid audience/issuer/signature, and forged headers in tests.
+Set `ACCESS_TEAM_DOMAIN` to the hostname only, such as `<team>.cloudflareaccess.com` (no `https://` or slash), and `ACCESS_AUD` to the self-hosted application's audience tag. Add these non-secret values alongside `AUTH_MODE` in root `wrangler.jsonc` `vars`, then rebuild. The issuer is `https://<ACCESS_TEAM_DOMAIN>` and keys come only from `https://<ACCESS_TEAM_DOMAIN>/cdn-cgi/access/certs`. Public keys are cached for up to 60 seconds; a newly rotated key may take that long to be accepted. JWKS failure fails closed. No JWTs or identities are cached or logged.
 
-Retain the existing session authentication mode for independent hosting. Do not copy an unverified Access email header into `oai-authenticated-user-email`, expose dispatch mode directly, or set any client-visible secret. The existing `VITE_SESSION_SECRET` fallback is unsuitable for production; use the Worker runtime secret.
+Until both Access vars and a valid `SESSION_SECRET` are set, session-mode protected routes and the bridge return 503. No session-mode request falls back to dispatch email headers, including localhost development requests. Auth responses use `private, no-store`.
 
-### 4. Provision D1 and private R2
+Tests cover absent JWT/configuration, forged email headers, bad signatures, wrong issuer/audience, malformed/expired/premature claims, invalid algorithms/keys, JWKS failure, secure session cookies, owner isolation, identity switching, and logout/revocation. Review and run the complete suite before deployment. See Cloudflare's [JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/) and [logout behavior](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/#log-out-as-a-user).
 
-Only after the owner has authorized account access, run:
+### 4. Use the already-provisioned D1 and private R2
 
-```sh
-npx wrangler d1 create immigrant-os-db
-npx wrangler r2 bucket create immigrant-os-files
-```
+Use `immigrant-os-db` (`b9fe7d41-8f74-49cd-9e5b-dacf60ca9f7a`) and `immigrant-os-files` in account `8fba78f3e5f52d302a5482370c61c15c`, exactly as committed in `wrangler.jsonc`. Do not run resource-create commands. Verify in the operator's dashboard that R2 remains private, without a public custom domain or `r2.dev` access. The app uses native bindings and needs no R2 S3 credentials.
 
-Record the returned D1 database ID for the configuration. Keep the R2 bucket private: no public custom domain or `r2.dev` access. The app uses the native R2 binding, so no R2 S3 credentials or browser upload tokens are needed. These command forms are supported by the repository's Wrangler and documented in the [D1 CLI](https://developers.cloudflare.com/d1/wrangler-commands/) and [R2 CLI](https://developers.cloudflare.com/r2/reference/wrangler-commands/).
+### 5. Review production configuration and its Vite connection
 
-### 5. Create production configuration and connect Vite to it
-
-Create a root `wrangler.jsonc` on the future hosting implementation branch. This is a template for the missing file, not a file added by this run:
+The committed root `wrangler.jsonc` contains the following configuration. Add only the operator-selected Access vars and, at step 9, the protected hostname:
 
 ```jsonc
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "immigrant-os",
+  "account_id": "8fba78f3e5f52d302a5482370c61c15c",
   "main": "./worker/index.ts",
   "compatibility_date": "2026-05-15",
   "compatibility_flags": ["nodejs_compat"],
@@ -72,11 +80,12 @@ Create a root `wrangler.jsonc` on the future hosting implementation branch. This
   "routes": [],
   "assets": { "binding": "ASSETS" },
   "images": { "binding": "IMAGES" },
+  "vars": { "AUTH_MODE": "session" },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "immigrant-os-db",
-      "database_id": "<D1_ID_RETURNED_BY_CREATE>",
+      "database_id": "b9fe7d41-8f74-49cd-9e5b-dacf60ca9f7a",
       "migrations_dir": "drizzle"
     }
   ],
@@ -86,11 +95,11 @@ Create a root `wrangler.jsonc` on the future hosting implementation branch. This
 }
 ```
 
-Replace the D1 placeholder; select the owner's account through the authorized Wrangler environment. The compatibility date above matches the current toolchain's generated artifact. Keep initial routes empty and both default/preview URLs disabled until the gate and secret are ready. The Vite plugin generates the static-asset directory in the deployment output; do not point production at the TypeScript entry without first building.
+The account and D1 identifiers are already set; use owner-authorized Wrangler credentials for that account. The compatibility date above matches the current toolchain's generated artifact. Keep initial routes empty and both default/preview URLs disabled until the gate and secret are ready. The Vite plugin generates the static-asset directory in the deployment output; do not point production at the TypeScript entry without first building.
 
-In `vite.config.ts`, replace `config: localBindingConfig` with `configPath: "./wrangler.jsonc"` for the independent-hosting configuration, removing the obsolete local-binding declarations/imports as appropriate. Preserve `vinext()`, `sites()`, and `viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] }`. The plugin applies inline `config` overrides after reading a file, which is why the placeholder override must be removed. See its [configuration API](https://developers.cloudflare.com/workers/vite-plugin/reference/api/). Keep the current Sites configuration on the existing deployment until cutover.
+In `vite.config.ts`, `configPath: "./wrangler.jsonc"` now replaces `config: localBindingConfig`, and the obsolete inline overrides/imports are removed. `vinext()`, `sites()`, and `viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] }` are preserved. The plugin applies inline `config` overrides after reading a file, which is why retaining the placeholder override would be incorrect. See its [configuration API](https://developers.cloudflare.com/workers/vite-plugin/reference/api/). Keep the current Sites configuration on the existing deployment until cutover.
 
-Add a `vars` object containing the runtime non-secret names listed below with operator-supplied settings. `AUTH_MODE` must select the existing **session** mode, not the dispatch default. The Access settings must match the implementation from step 3. Values are deliberately not listed here.
+Keep `vars.AUTH_MODE` set to **session** and add `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` using the operator-supplied settings from step 3. Do not place the session secret in `vars`.
 
 The image binding supports the retained `/_vinext/image` handler. Configure the corresponding Cloudflare Images capability if retaining this route; otherwise disable/remove the unused optimizer in the hosting implementation and omit that binding. The present UI uses inline SVG and does not require optimized uploaded-file previews. Do not silently leave a reachable handler that calls an absent binding. See [Images bindings](https://developers.cloudflare.com/images/transform-images/bindings/).
 
@@ -125,7 +134,7 @@ The explicit generated-config command deploys the bundled Worker and its assets,
 
 ### 8. Bootstrap without public routes, then install the secret
 
-Once step 3 is complete and checks pass, deploy the artifact with routes still empty and both default and preview URLs disabled. This establishes the Worker so its secret can be stored without publishing the app to a public hostname:
+Once the Access vars are configured and checks pass, deploy the artifact with routes still empty and both default and preview URLs disabled. This establishes the Worker so its secret can be stored without publishing the app to a public hostname:
 
 ```sh
 npx wrangler deploy --config dist/server/wrangler.json
@@ -140,8 +149,8 @@ Environment/binding inventory (names only; no values):
 | --- | --- |
 | `AUTH_MODE` | Existing runtime non-secret variable; must select session authentication. |
 | `SESSION_SECRET` | Existing required runtime secret for session signing. Store with Wrangler secrets. |
-| `TEAM_DOMAIN` | Proposed non-secret Access issuer configuration; must be implemented in step 3. |
-| `POLICY_AUD` | Proposed non-secret Access audience configuration; must be implemented in step 3. |
+| `ACCESS_TEAM_DOMAIN` | Runtime non-secret team hostname, `<team>.cloudflareaccess.com`; implemented, but operator must supply the value. No URL scheme/path. |
+| `ACCESS_AUD` | Runtime non-secret audience tag of the self-hosted Access application; implemented, but operator must supply the value. |
 | `CLOUDFLARE_ACCOUNT_ID` | Operator/CLI account selection, not application data. |
 | `CLOUDFLARE_API_TOKEN` | Optional operator/CLI secret if using token authentication instead of an existing authorized login. Not a Worker secret. |
 | `DB` | Existing native D1 binding, not a connection-string environment variable. |
@@ -149,7 +158,7 @@ Environment/binding inventory (names only; no values):
 | `ASSETS` | Native static-assets binding used by the Worker. |
 | `IMAGES` | Native Images binding required if the existing optimizer route is retained. |
 
-No OpenAI, USCIS, SMTP, OAuth-client, or database-password secrets are required by today's code. Access sends PINs; the app has no mailer. Never populate `VITE_SESSION_SECRET` for a deployed build. `.env*` is ignored, but `.dev.vars*` and backup files are not currently explicitly ignored: add ignore rules before using them, and keep all credentials, runtime data, uploads, and exports outside Git.
+No OpenAI, USCIS, SMTP, OAuth-client, or database-password secrets are required by today's code. Access sends PINs; the app has no mailer. Never populate `VITE_SESSION_SECRET` for a deployed build. Both `.env*` and `.dev.vars*` are ignored. Keep all credentials, runtime data, uploads, backup files, and exports outside Git.
 
 ### 9. Attach only the protected hostname and deploy the final artifact
 
@@ -183,4 +192,12 @@ This route-only rebuild follows the already-tested implementation. Re-run the fu
 - Verify HTML, JS/CSS, mobile layout, and the image endpoint if retained. Check Worker errors without logging cookies, JWTs, profile content, or uploaded files.
 - Define retention and recovery procedures, back up D1 and R2 outside Git, and rehearse restore into separate test resources. A D1 backup does not include file objects. Ensure restored document metadata matches R2 object keys before relying on recovery.
 
-**Launch blockers at this revision:** Access-to-session login/logout integration and its configuration; a real production Wrangler/Vite configuration; owner-provisioned D1/R2 plus remote migrations; backup/restore verification; and real two-account login/isolation smoke tests. The content audit also records source/wording review work. This run prepares documentation and does not claim any blocker is resolved by a successful local build.
+**Remaining launch gates:** complete tests outside the listener-restricted sandbox; operator-provided Access hostname/team/audience and session secret; remote D1 migration verification; gated deployment and real two-account login/isolation smoke tests; backup/restore verification. Local build success does not establish these external results.
+
+## Implementation validation (2026-11-09)
+
+- Node 22.22.0; `npm ci --offline --cache /Users/chao/Projects/immigrant-os/.sites-runtime/npm-cache --no-audit --no-fund` passed using the existing local cache. Lockfile/dependencies unchanged.
+- `npm run build` passed, including the existing artifact validator. The generated `dist/server/wrangler.json` has the real account/D1/R2, `AUTH_MODE=session`, `ASSETS`/`IMAGES`, and disabled default/preview routes. Migrations continue to use the root config, not the generated config.
+- `npx tsc --noEmit` passed.
+- `npm test` exited 1: 12 passing results (nine nested Access validation/bootstrap checks, their parent, calendar, rendered HTML); three Miniflare suite initializations failed with `listen EPERM: operation not permitted 127.0.0.1`. Their nested session/owner/storage tests did not run. The suites were not weakened or skipped; rerun the entire command outside this sandbox.
+- No Wrangler command was run, including no dry-run deploy. All cloud commands in this document are remaining operator actions.

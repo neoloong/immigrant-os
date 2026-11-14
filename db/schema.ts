@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const profiles = sqliteTable("profiles", {
   owner: text("owner").primaryKey(),
@@ -75,3 +75,19 @@ export const completedActions = sqliteTable(
     uniqueIndex("completed_actions_owner_key_idx").on(table.owner, table.actionKey),
   ],
 );
+
+export const agentTokens = sqliteTable("agent_tokens", {
+  id: text("id").primaryKey(),
+  owner: text("owner").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  label: text("label").notNull(),
+  scopes: text("scopes", { enum: ["read", "write"] }).notNull(),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  lastUsedAt: text("last_used_at"),
+  revokedAt: text("revoked_at"),
+}, (table) => [
+  check("agent_tokens_scopes_check", sql`${table.scopes} IN ('read', 'write')`),
+  uniqueIndex("agent_tokens_hash_idx").on(table.tokenHash),
+  index("agent_tokens_owner_idx").on(table.owner),
+]);

@@ -3,9 +3,10 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { ImmigrationProfile, LifecycleStage } from "../lib/profile";
 import type { PlanItem, PlanResult, Source } from "../lib/rules";
+import AgentSettings from "./agent-settings";
 import { calendarFile } from "../lib/calendar";
 
-type View = "plan" | "documents" | "cases" | "assistant";
+type View = "plan" | "documents" | "cases" | "assistant" | "settings";
 type SavedDocument = { id: string; kind: string; filename: string; mimeType: string; sizeBytes: number; uploadedAt: string };
 type TrackedCase = { id: string; receiptNumber: string; formType: string; nickname: string; statusText: string; lastCheckedAt: string | null; createdAt: string };
 type ChatMessage = { role: "user" | "assistant"; text: string; sources?: Source[]; limitations?: string };
@@ -39,6 +40,7 @@ const NAV: { id: View; label: string; icon: string }[] = [
   { id: "documents", label: "Documents", icon: "file" },
   { id: "cases", label: "Cases", icon: "case" },
   { id: "assistant", label: "Assistant", icon: "spark" },
+  { id: "settings", label: "Settings", icon: "shield" },
 ];
 
 export default function Home() {
@@ -97,6 +99,7 @@ export default function Home() {
           {NAV.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon name={item.icon} /><span>{item.label}</span></button>)}
         </nav>
         <div className="privacy-note"><Icon name="shield" /><div><strong>Account-private workspace</strong><span>Files and records are scoped to your signed-in account.</span></div></div>
+        <form action="/auth/logout" method="post"><button type="submit">Sign out</button></form>
         <button className="profile-button" onClick={() => setProfileOpen(true)}><span className="avatar">{initials(profile.displayName)}</span><span><strong>{profile.displayName || "Your profile"}</strong><small>Edit immigration profile</small></span><Icon name="chevron" /></button>
       </aside>
 
@@ -111,6 +114,7 @@ export default function Home() {
         {view === "documents" && <DocumentsView documents={documents} onChanged={async () => { await refresh(); }} notify={notify} />}
         {view === "cases" && <CasesView cases={cases} onChanged={async () => { await refresh(); }} notify={notify} />}
         {view === "assistant" && <AssistantView plan={plan} />}
+        {view === "settings" && <AgentSettings />}
       </section>
 
       <nav className="bottom-nav" aria-label="Mobile navigation">{NAV.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon name={item.icon} /><span>{item.label}</span></button>)}</nav>
@@ -302,7 +306,7 @@ function DateField({ label, value, onChange, required = false }: { label: string
 
 function EmptyState({ icon, title, copy }: { icon: string; title: string; copy: string }) { return <div className="empty-state"><span><Icon name={icon} /></span><h2>{title}</h2><p>{copy}</p></div>; }
 function LoadingScreen() { return <main className="center-screen"><Brand /><span className="large-spinner" /><p>Loading your immigration workspace…</p></main>; }
-function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) { return <main className="center-screen error-screen"><span className="error-mark"><Icon name="alert" /></span><h1>Workspace unavailable</h1><p>{message}</p><button className="primary" onClick={onRetry}>Try again</button><a href="/signin-with-chatgpt?return_to=%2F">Sign in with ChatGPT</a></main>; }
+function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) { return <main className="center-screen error-screen"><span className="error-mark"><Icon name="alert" /></span><h1>Workspace unavailable</h1><p>{message}</p><button className="primary" onClick={onRetry}>Try again</button><a href="/auth/login">Sign in</a></main>; }
 function Brand({ mobile = false }: { mobile?: boolean }) { return <div className={mobile ? "brand mobile-brand" : "brand"}><span className="brand-mark">I</span><span>Immigrant<b>OS</b></span></div>; }
 
 function Icon({ name, size = 20 }: { name: string; size?: number }) {

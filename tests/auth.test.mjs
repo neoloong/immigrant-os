@@ -3,12 +3,15 @@ import test from "node:test";
 import { createHmac, randomUUID } from "node:crypto";
 import { Miniflare } from "miniflare";
 import worker from "../dist/server/index.js";
+import { accessFixture } from "./helpers/access.mjs";
 
 test("session auth mode rejects spoofed headers and honors signed sessions", async (t) => {
+  const access = accessFixture(t);
   const mf = new Miniflare({ modules: true, script: "export default { fetch() { return new Response('test'); } }", d1Databases: ["DB"], r2Buckets: ["BUCKET"] });
   try {
     const secret = "a".repeat(64);
     const env = {
+      ...access.env,
       DB: await mf.getD1Database("DB"),
       BUCKET: await mf.getR2Bucket("BUCKET"),
       ASSETS: { fetch: () => new Response("Not found", { status: 404 }) },
@@ -18,7 +21,7 @@ test("session auth mode rejects spoofed headers and honors signed sessions", asy
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS sessions (id text PRIMARY KEY NOT NULL, owner text NOT NULL, expires_at text NOT NULL, created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL)").run();
 
     const call = async (headers, path, method = "GET", body) => {
-      const h = new Headers(headers);
+      const h = new Headers({ "Cf-Access-Jwt-Assertion": access.jwt({ email: "session-owner@example.test" }), ...headers });
       if (body && !(body instanceof FormData)) h.set("content-type", "application/json");
       return worker.fetch(new Request(`http://localhost${path}`, { method, headers: h, body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined }), env, { waitUntil() {}, passThroughOnException() {} });
     };
@@ -56,7 +59,7 @@ test("session auth mode rejects spoofed headers and honors signed sessions", asy
 
       const other = randomUUID();
       await insert(other, "other@example.test", new Date(Date.now() + 3600_000).toISOString());
-      assert.equal((await (await call({ cookie: `immigrant_session=${sign(other)}` }, "/api/profile")).json()).profile, null);
+      assert.equal((await (await call({ cookie: `immigrant_session=${sign(other)}`, "Cf-Access-Jwt-Assertion": access.jwt({ email: "other@example.test" }) }, "/api/profile")).json()).profile, null);
     });
 
     await t.test("expired session is rejected", async () => {

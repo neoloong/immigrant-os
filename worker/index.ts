@@ -2,11 +2,17 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import type { D1BindingLike, R2BindingLike } from "../lib/runtime-env";
+import { handleAccessAuth } from "../lib/access-auth";
+import { handleMcp } from "../lib/mcp";
+import { handleAgentTokens } from "../lib/agent-tokens";
+import { agentDiscovery, agentGuide } from "../lib/agent-onboarding";
+import type { AccessEnv } from "../lib/access-jwt";
 
-interface Env {
+interface Env extends AccessEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DB: D1BindingLike;
   BUCKET: R2BindingLike;
+  AGENT_MCP_ENABLED?: string;
   AUTH_MODE?: string;
   SESSION_SECRET?: string;
   IMAGES: {
@@ -38,6 +44,27 @@ const worker = {
       __IMMIGRANT_AUTH_CONFIG__?: { authMode?: string; sessionSecret?: string };
     }).__IMMIGRANT_AUTH_CONFIG__ = { authMode: env.AUTH_MODE, sessionSecret: env.SESSION_SECRET };
     const url = new URL(request.url);
+
+    // Only these exact routes are public/independently authenticated. The web
+    // Access bridge and all existing authenticated routes remain unchanged.
+    const agentsEnabled = env.AGENT_MCP_ENABLED === "true";
+    if (url.pathname === "/mcp") return handleMcp(request, agentsEnabled);
+    if (url.pathname === "/agents" || url.pathname === "/llms.txt") {
+      if (!["GET", "HEAD"].includes(request.method)) return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+      const guide = url.pathname === "/agents";
+      return new Response(request.method === "HEAD" ? null : guide ? agentGuide(url.origin, agentsEnabled) : agentDiscovery(url.origin, agentsEnabled), {
+        headers: { "content-type": guide ? "text/html; charset=utf-8" : "text/plain; charset=utf-8", "cache-control": "no-store",
+          "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+          "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" },
+      });
+    }
+    const authResponse = await handleAccessAuth(request, env);
+    if (authResponse) return authResponse;
+    if (url.pathname === "/api/agent-tokens") {
+      const response = await handleAgentTokens(request, agentsEnabled);
+      response.headers.set("cache-control", "private, no-store");
+      return response;
+    }
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];

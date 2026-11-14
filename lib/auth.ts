@@ -34,12 +34,11 @@ export function getAuthConfig(): AuthConfig {
 }
 
 export async function ownerFromRequest(request: Request): Promise<string | null> {
+  const config = getAuthConfig();
   const hostname = new URL(request.url).hostname;
-  if (import.meta.env.DEV && (hostname === "terminal.local" || hostname === "localhost" || hostname === "127.0.0.1")) {
+  if (config.authMode === "dispatch" && import.meta.env.DEV && (hostname === "terminal.local" || hostname === "localhost" || hostname === "127.0.0.1")) {
     return PREVIEW_OWNER;
   }
-
-  const config = getAuthConfig();
 
   if (config.authMode === "dispatch") {
     const email = request.headers.get(AUTH_EMAIL_HEADER)?.trim().toLowerCase();
@@ -75,6 +74,10 @@ export async function revokeSession(cookieValue: string): Promise<void> {
   if (!id) return;
   await ensureDatabase();
   await getDb().delete(sessions).where(eq(sessions.id, id));
+}
+
+export function sessionCookieFromRequest(request: Request): string | null {
+  return readCookie(request, getAuthConfig().sessionCookieName);
 }
 
 async function ownerFromSessionCookie(request: Request, config: AuthConfig): Promise<string | null> {
