@@ -46,28 +46,55 @@ const NAV: { id: View; label: string; icon: string }[] = [
 export default function Home() {
   const [view, setView] = useState<View>("plan");
   const [profile, setProfile] = useState<ImmigrationProfile | null>(null);
+  const [profiles, setProfiles] = useState<ImmigrationProfile[]>([]);
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [documents, setDocuments] = useState<SavedDocument[]>([]);
   const [cases, setCases] = useState<TrackedCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [addingProfile, setAddingProfile] = useState(false);
   const [toast, setToast] = useState("");
   const [fatalError, setFatalError] = useState("");
 
-  const refresh = async () => {
+  const refresh = async (requestedProfileId?: string | null) => {
     setFatalError("");
+    const targetId = requestedProfileId !== undefined ? requestedProfileId : activeProfileId;
+    const query = targetId ? `?profileId=${encodeURIComponent(targetId)}` : "";
     try {
       const [profileData, planData, documentData, caseData] = await Promise.all([
-        api<{ profile: ImmigrationProfile | null }>("/api/profile"),
-        api<{ plan: PlanResult | null }>("/api/plan"),
-        api<{ documents: SavedDocument[] }>("/api/documents"),
-        api<{ cases: TrackedCase[] }>("/api/cases"),
+        api<{ profile: ImmigrationProfile | null; profiles?: ImmigrationProfile[] }>(`/api/profile${query}`),
+        api<{ plan: PlanResult | null }>(`/api/plan${query}`),
+        api<{ documents: SavedDocument[] }>(`/api/documents${query}`),
+        api<{ cases: TrackedCase[] }>(`/api/cases${query}`),
       ]);
       setProfile(profileData.profile);
+      setProfiles(profileData.profiles ?? (profileData.profile ? [profileData.profile] : []));
+      setActiveProfileId(profileData.profile?.id ?? null);
       setPlan(planData.plan);
       setDocuments(documentData.documents);
       setCases(caseData.cases);
     } catch (error) {
+      if (targetId) {
+        try {
+          const [profileData, planData, documentData, caseData] = await Promise.all([
+            api<{ profile: ImmigrationProfile | null; profiles?: ImmigrationProfile[] }>("/api/profile"),
+            api<{ plan: PlanResult | null }>("/api/plan"),
+            api<{ documents: SavedDocument[] }>("/api/documents"),
+            api<{ cases: TrackedCase[] }>("/api/cases"),
+          ]);
+          setProfile(profileData.profile);
+          setProfiles(profileData.profiles ?? (profileData.profile ? [profileData.profile] : []));
+          setActiveProfileId(profileData.profile?.id ?? null);
+          setPlan(planData.plan);
+          setDocuments(documentData.documents);
+          setCases(caseData.cases);
+          return;
+        } catch (fallbackError) {
+          setFatalError(fallbackError instanceof Error ? fallbackError.message : "Unable to load your workspace.");
+          return;
+        }
+      }
       setFatalError(error instanceof Error ? error.message : "Unable to load your workspace.");
     } finally {
       setLoading(false);
@@ -77,6 +104,7 @@ export default function Home() {
   useEffect(() => {
     const timer = window.setTimeout(() => { void refresh(); }, 0);
     return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const notify = (message: string) => {
@@ -84,11 +112,70 @@ export default function Home() {
     window.setTimeout(() => setToast(""), 3400);
   };
 
+  const selectProfile = async (nextProfileId: string) => {
+    if (!nextProfileId || nextProfileId === profile?.id) return;
+    setActiveProfileId(nextProfileId);
+    await refresh(nextProfileId);
+    const chosen = profiles.find((item) => item.id === nextProfileId);
+    if (chosen) {
+      notify(`Switched to ${chosen.displayName || "primary profile"}.`);
+    }
+  };
+
+  const handleRenameProfile = async (id: string, displayName: string) => {
+    try {
+      await api("/api/profile", {
+        method: "PATCH",
+        body: JSON.stringify({ profileId: id, displayName }),
+      });
+      await refresh(activeProfileId);
+      notify("Profile renamed.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Unable to rename profile.");
+      throw error;
+    }
+  };
+
+  const handleDeleteProfile = async (target: ImmigrationProfile) => {
+    if (!target.id || target.isPrimary || profiles.length <= 1) return;
+    const label = target.displayName || "this profile";
+    if (!window.confirm(`Delete profile "${label}" and its saved documents, cases, and completed tasks? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      const result = await api<{ profile: ImmigrationProfile | null; profiles: ImmigrationProfile[] }>(
+        `/api/profile?profileId=${encodeURIComponent(target.id)}`,
+        { method: "DELETE" },
+      );
+      const nextId = activeProfileId === target.id ? (result.profile?.id ?? null) : activeProfileId;
+      setActiveProfileId(nextId);
+      await refresh(nextId);
+      notify(`Profile "${label}" deleted.`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Unable to delete profile.");
+    }
+  };
+
   if (loading) return <LoadingScreen />;
   if (fatalError) return <ErrorScreen message={fatalError} onRetry={() => { setLoading(true); void refresh(); }} />;
-  if (!profile) return <Onboarding onSaved={() => { setLoading(true); void refresh(); }} />;
+  if (!profile) return <Onboarding onSaved={(createdId) => { setLoading(true); void refresh(createdId ?? null); }} />;
+  if (addingProfile) {
+    return (
+      <Onboarding
+        mode="add"
+        onCancel={() => setAddingProfile(false)}
+        onSaved={(createdId) => {
+          setAddingProfile(false);
+          setLoading(true);
+          void refresh(createdId ?? null);
+          notify("Profile added and action plan calculated.");
+        }}
+      />
+    );
+  }
 
   const stage = STAGES.find((item) => item.id === profile.lifecycleStage) ?? STAGES[0];
+  const profileList = profiles.length ? profiles : [profile];
 
   return (
     <main className="app-shell">
@@ -106,20 +193,70 @@ export default function Home() {
       <section className="workspace">
         <header className="topbar">
           <Brand mobile />
+          <div className="profile-switcher" role="group" aria-label="Profile switcher">
+            <label className="switcher-select-wrap">
+              <span className="visually-hidden">Switch profile</span>
+              <select
+                aria-label="Switch profile"
+                value={profile.id ?? ""}
+                onChange={(event) => {
+                  if (event.target.value === "__add__") {
+                    setAddingProfile(true);
+                    return;
+                  }
+                  void selectProfile(event.target.value);
+                }}
+              >
+                {profileList.map((item, idx) => (
+                  <option key={item.id ?? idx} value={item.id ?? ""}>
+                    {profileLabel(item, idx)}
+                  </option>
+                ))}
+                <option value="__add__">+ Add profile…</option>
+              </select>
+            </label>
+            <button type="button" className="secondary switcher-add" onClick={() => setAddingProfile(true)}>
+              <Icon name="plus" size={14} /> <span>Add profile</span>
+            </button>
+          </div>
           <div className="topbar-copy"><span className="coverage-dot" /><span>{plan?.coverage ?? stage.coverage} module</span><b>Dates from your profile · Review official guidance</b></div>
           <button className="avatar top-avatar" onClick={() => setProfileOpen(true)} aria-label="Edit profile">{initials(profile.displayName)}</button>
         </header>
 
-        {view === "plan" && <PlanView profile={profile} plan={plan} documents={documents} cases={cases} onEdit={() => setProfileOpen(true)} onNavigate={setView} onRefresh={async () => { await refresh(); }} notify={notify} />}
-        {view === "documents" && <DocumentsView documents={documents} onChanged={async () => { await refresh(); }} notify={notify} />}
-        {view === "cases" && <CasesView cases={cases} onChanged={async () => { await refresh(); }} notify={notify} />}
-        {view === "assistant" && <AssistantView plan={plan} />}
-        {view === "settings" && <AgentSettings />}
+        {view === "plan" && <PlanView key={profile.id ?? "primary"} profile={profile} plan={plan} documents={documents} cases={cases} onEdit={() => setProfileOpen(true)} onNavigate={setView} onRefresh={async () => { await refresh(); }} notify={notify} />}
+        {view === "documents" && <DocumentsView key={profile.id ?? "primary"} profileId={profile.id} documents={documents} onChanged={async () => { await refresh(); }} notify={notify} />}
+        {view === "cases" && <CasesView key={profile.id ?? "primary"} profileId={profile.id} cases={cases} onChanged={async () => { await refresh(); }} notify={notify} />}
+        {view === "assistant" && <AssistantView key={profile.id ?? "primary"} profileId={profile.id} plan={plan} />}
+        {view === "settings" && (
+          <AgentSettings
+            profiles={profileList}
+            activeProfileId={profile.id}
+            onSelectProfile={(id) => void selectProfile(id)}
+            onAddProfile={() => setAddingProfile(true)}
+            onRenameProfile={handleRenameProfile}
+            onDeleteProfile={handleDeleteProfile}
+          />
+        )}
       </section>
 
       <nav className="bottom-nav" aria-label="Mobile navigation">{NAV.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon name={item.icon} /><span>{item.label}</span></button>)}</nav>
 
-      {profileOpen && <ProfileDialog profile={profile} onClose={() => setProfileOpen(false)} onSaved={async () => { setProfileOpen(false); await refresh(); notify("Profile saved and action plan recalculated."); }} />}
+      {profileOpen && (
+        <ProfileDialog
+          profile={profile}
+          canDelete={!profile.isPrimary && profileList.length > 1}
+          onDelete={async () => {
+            setProfileOpen(false);
+            await handleDeleteProfile(profile);
+          }}
+          onClose={() => setProfileOpen(false)}
+          onSaved={async () => {
+            setProfileOpen(false);
+            await refresh();
+            notify("Profile saved and action plan recalculated.");
+          }}
+        />
+      )}
       {toast && <div className="toast"><span><Icon name="check" /></span>{toast}</div>}
     </main>
   );
@@ -141,7 +278,10 @@ function PlanView({ profile, plan, documents, cases, onEdit, onNavigate, onRefre
   const toggle = async (item: PlanItem) => {
     setBusy(item.id);
     try {
-      await api("/api/actions", { method: "POST", body: JSON.stringify({ actionKey: item.id, completed: !item.completed }) });
+      await api("/api/actions", {
+        method: "POST",
+        body: JSON.stringify({ actionKey: item.id, completed: !item.completed, profileId: profile.id }),
+      });
       await onRefresh();
       notify(item.completed ? "Action reopened." : "Action marked complete.");
     } catch (error) {
@@ -166,10 +306,11 @@ function PlanView({ profile, plan, documents, cases, onEdit, onNavigate, onRefre
   </div>;
 }
 
-function DocumentsView({ documents, onChanged, notify }: { documents: SavedDocument[]; onChanged: () => Promise<void>; notify: (message: string) => void }) {
+function DocumentsView({ profileId, documents, onChanged, notify }: { profileId?: string; documents: SavedDocument[]; onChanged: () => Promise<void>; notify: (message: string) => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [kind, setKind] = useState("Passport");
   const [uploading, setUploading] = useState(false);
+  const profileParam = profileId ? `&profileId=${encodeURIComponent(profileId)}` : "";
 
   const upload = async (file?: File) => {
     if (!file) return;
@@ -178,6 +319,7 @@ function DocumentsView({ documents, onChanged, notify }: { documents: SavedDocum
       const form = new FormData();
       form.set("file", file);
       form.set("kind", kind);
+      if (profileId) form.set("profileId", profileId);
       await api("/api/documents", { method: "POST", body: form });
       if (fileRef.current) fileRef.current.value = "";
       await onChanged();
@@ -192,7 +334,7 @@ function DocumentsView({ documents, onChanged, notify }: { documents: SavedDocum
   const remove = async (document: SavedDocument) => {
     if (!window.confirm(`Delete ${document.filename}? This cannot be undone.`)) return;
     try {
-      await api(`/api/documents?id=${encodeURIComponent(document.id)}`, { method: "DELETE" });
+      await api(`/api/documents?id=${encodeURIComponent(document.id)}${profileParam}`, { method: "DELETE" });
       await onChanged();
       notify("Document deleted.");
     } catch (error) {
@@ -203,22 +345,23 @@ function DocumentsView({ documents, onChanged, notify }: { documents: SavedDocum
   return <div className="page"><section className="page-intro"><div><p className="eyebrow">PRIVATE DOCUMENT VAULT</p><h1>Your documents</h1><p>Actual files are stored with your signed-in workspace—not simulated.</p></div></section><section className="upload-panel"><div className="upload-mark"><Icon name="upload" /></div><div><h2>Add a document</h2><p>Save a PDF, JPEG, or PNG. OCR and field extraction are not enabled in this build, so use Profile to enter confirmed dates.</p></div><label><span>Document type</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option>Passport</option><option>Visa</option><option>Form I-20</option><option>I-94</option><option>EAD</option><option>USCIS notice</option><option>Green Card</option><option>Other</option></select></label><input ref={fileRef} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => void upload(event.target.files?.[0])} /><button className="primary" disabled={uploading} onClick={() => fileRef.current?.click()}><Icon name="upload" /> {uploading ? "Uploading…" : "Choose file"}</button></section>
 
     <div className="section-heading document-heading"><div><p className="eyebrow">SAVED FILES</p><h2>{documents.length} document{documents.length === 1 ? "" : "s"}</h2></div><span>Maximum 10 MB each</span></div>
-    {documents.length ? <div className="document-list">{documents.map((document) => <article className="document-row" key={document.id}><span className="document-icon"><Icon name="file" /></span><div><span className="tag info">{document.kind}</span><h3>{document.filename}</h3><p>{formatBytes(document.sizeBytes)} · Uploaded {formatDateTime(document.uploadedAt)}</p></div><a className="icon-action" href={`/api/documents?download=${encodeURIComponent(document.id)}`} aria-label={`Download ${document.filename}`}><Icon name="download" /></a><button className="icon-action danger" onClick={() => void remove(document)} aria-label={`Delete ${document.filename}`}><Icon name="trash" /></button></article>)}</div> : <EmptyState icon="file" title="No saved documents" copy="Upload one document to test the real vault flow." />}
+    {documents.length ? <div className="document-list">{documents.map((document) => <article className="document-row" key={document.id}><span className="document-icon"><Icon name="file" /></span><div><span className="tag info">{document.kind}</span><h3>{document.filename}</h3><p>{formatBytes(document.sizeBytes)} · Uploaded {formatDateTime(document.uploadedAt)}</p></div><a className="icon-action" href={`/api/documents?download=${encodeURIComponent(document.id)}${profileParam}`} aria-label={`Download ${document.filename}`}><Icon name="download" /></a><button className="icon-action danger" onClick={() => void remove(document)} aria-label={`Delete ${document.filename}`}><Icon name="trash" /></button></article>)}</div> : <EmptyState icon="file" title="No saved documents" copy="Upload one document to test the real vault flow." />}
     <section className="security-strip"><Icon name="shield" /><div><strong>Use the minimum data needed.</strong><p>Do not upload Social Security cards, payment cards, or unrelated financial records. You can download or permanently delete each file.</p></div></section>
   </div>;
 }
 
-function CasesView({ cases, onChanged, notify }: { cases: TrackedCase[]; onChanged: () => Promise<void>; notify: (message: string) => void }) {
+function CasesView({ profileId, cases, onChanged, notify }: { profileId?: string; cases: TrackedCase[]; onChanged: () => Promise<void>; notify: (message: string) => void }) {
   const [receiptNumber, setReceiptNumber] = useState("");
   const [formType, setFormType] = useState("");
   const [nickname, setNickname] = useState("");
   const [saving, setSaving] = useState(false);
+  const profileParam = profileId ? `&profileId=${encodeURIComponent(profileId)}` : "";
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSaving(true);
     try {
-      await api("/api/cases", { method: "POST", body: JSON.stringify({ receiptNumber, formType, nickname }) });
+      await api("/api/cases", { method: "POST", body: JSON.stringify({ receiptNumber, formType, nickname, profileId }) });
       setReceiptNumber(""); setFormType(""); setNickname("");
       await onChanged();
       notify("USCIS receipt saved.");
@@ -228,7 +371,7 @@ function CasesView({ cases, onChanged, notify }: { cases: TrackedCase[]; onChang
   };
 
   const remove = async (id: string) => {
-    try { await api(`/api/cases?id=${encodeURIComponent(id)}`, { method: "DELETE" }); await onChanged(); notify("Case removed."); }
+    try { await api(`/api/cases?id=${encodeURIComponent(id)}${profileParam}`, { method: "DELETE" }); await onChanged(); notify("Case removed."); }
     catch (error) { notify(error instanceof Error ? error.message : "Unable to remove case."); }
   };
 
@@ -240,7 +383,7 @@ function CasesView({ cases, onChanged, notify }: { cases: TrackedCase[]; onChang
   </div>;
 }
 
-function AssistantView({ plan }: { plan: PlanResult | null }) {
+function AssistantView({ profileId, plan }: { profileId?: string; plan: PlanResult | null }) {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [asking, setAsking] = useState(false);
@@ -252,7 +395,7 @@ function AssistantView({ plan }: { plan: PlanResult | null }) {
     setMessages((current) => [...current, { role: "user", text }]);
     setQuestion(""); setAsking(true);
     try {
-      const response = await api<{ answer: string; sources: Source[]; limitations: string }>("/api/assistant", { method: "POST", body: JSON.stringify({ question: text }) });
+      const response = await api<{ answer: string; sources: Source[]; limitations: string }>("/api/assistant", { method: "POST", body: JSON.stringify({ question: text, profileId }) });
       setMessages((current) => [...current, { role: "assistant", text: response.answer, sources: response.sources, limitations: response.limitations }]);
     } catch (error) {
       setMessages((current) => [...current, { role: "assistant", text: error instanceof Error ? error.message : "Unable to answer." }]);
@@ -262,30 +405,38 @@ function AssistantView({ plan }: { plan: PlanResult | null }) {
   return <div className="page assistant-page"><section className="assistant-intro"><span className="assistant-mark"><Icon name="spark" /></span><p className="eyebrow">PROFILE-GROUNDED ASSISTANT</p><h1>Ask about your action plan.</h1><p>Answers use your saved dates and checklist. This is a simple guide, not an AI chat or a legal eligibility assessment.</p><div className="assistant-status"><span className="coverage-dot" /><b>{plan?.stageLabel}</b><em>{plan?.coverage} module</em></div></section><section className="chat-card"><div className="chat-log" aria-live="polite">{!messages.length ? <div className="suggestion-grid">{suggestions.map((suggestion) => <button onClick={() => void ask(suggestion)} key={suggestion}>{suggestion}<Icon name="arrow" /></button>)}</div> : messages.map((message, index) => <div className={`message ${message.role}`} key={`${message.role}-${index}`}><span>{message.role === "assistant" ? <Icon name="spark" /> : "You"}</span><div><p>{message.text}</p>{message.sources?.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label} <Icon name="external" /></a>)}{message.limitations && <small>{message.limitations}</small>}</div></div>)}</div><form className="composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}><input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about your status, dates, or missing information…" aria-label="Ask ImmigrantOS" /><button disabled={asking || !question.trim()} aria-label="Send question">{asking ? <span className="spinner" /> : <Icon name="send" />}</button></form></section></div>;
 }
 
-function Onboarding({ onSaved }: { onSaved: () => void }) {
+function Onboarding({ mode = "initial", onCancel, onSaved }: { mode?: "initial" | "add"; onCancel?: () => void; onSaved: (createdProfileId?: string) => void }) {
   const [draft, setDraft] = useState<ImmigrationProfile>({ ...EMPTY_PROFILE });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const save = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true); setError("");
-    try { await api("/api/profile", { method: "PUT", body: JSON.stringify(draft) }); onSaved(); }
-    catch (err) { setError(err instanceof Error ? err.message : "Unable to save profile."); setSaving(false); }
+    try {
+      const response = await api<{ profile?: ImmigrationProfile }>("/api/profile", {
+        method: mode === "add" ? "POST" : "PUT",
+        body: JSON.stringify(draft),
+      });
+      onSaved(response.profile?.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save profile.");
+      setSaving(false);
+    }
   };
 
-  return <main className="onboarding-shell"><header><Brand /><span>Private beta · General information only</span></header><div className="onboarding-grid"><section className="onboarding-copy"><p className="eyebrow">YOUR DATES, IN ONE PLACE</p><h1>Know what matters next.</h1><p>Start with the dates you know. Save a personal checklist, track your receipts, and export dates to your calendar. Document upload is optional; you can add more details later.</p><div className="trust-list"><div><Icon name="plan" /><span><strong>Your saved dates</strong><small>Review the inputs and official guidance.</small></span></div><div><Icon name="shield" /><span><strong>A simple checklist</strong><small>Mark tasks done and pick up where you left off.</small></span></div><div><Icon name="spark" /><span><strong>Start small</strong><small>Choose your current stage; add details later.</small></span></div></div></section><form className="onboarding-card" onSubmit={save}><div className="step-label"><span>1</span><div><small>START HERE</small><strong>Where are you now?</strong></div></div><div className="stage-grid">{STAGES.map((stage) => <button type="button" className={draft.lifecycleStage === stage.id ? "selected" : ""} onClick={() => stage.id !== draft.lifecycleStage && setDraft({ ...draft, lifecycleStage: stage.id, statusSubtype: stageDefaults(stage.id, draft.displayName).statusSubtype })} key={stage.id}><span><b>{stage.label}</b><small>{stage.short}</small></span><em>{stage.coverage}</em></button>)}</div><div className="step-label second"><span>2</span><div><small>MINIMUM INPUTS</small><strong>Build your first timeline</strong></div></div><ProfileFields draft={draft} setDraft={setDraft} compact />{error && <p className="form-error">{error}</p>}<button className="primary wide" disabled={saving}>{saving ? "Building your plan…" : "Create my action plan"} <Icon name="arrow" /></button><p className="form-disclaimer">Your entries are saved to your signed-in account. Start without uploading documents. This checklist is not legal advice or an eligibility decision.</p></form></div></main>;
+  return <main className="onboarding-shell"><header><Brand /><span>Private beta · General information only</span>{onCancel && <button type="button" className="secondary" onClick={onCancel}>Cancel</button>}</header><div className="onboarding-grid"><section className="onboarding-copy"><p className="eyebrow">YOUR DATES, IN ONE PLACE</p><h1>{mode === "add" ? "Add a family profile." : "Know what matters next."}</h1><p>Start with the dates you know. Save a personal checklist, track your receipts, and export dates to your calendar. Document upload is optional; you can add more details later.</p><div className="trust-list"><div><Icon name="plan" /><span><strong>Your saved dates</strong><small>Review the inputs and official guidance.</small></span></div><div><Icon name="shield" /><span><strong>A simple checklist</strong><small>Mark tasks done and pick up where you left off.</small></span></div><div><Icon name="spark" /><span><strong>Start small</strong><small>Choose your current stage; add details later.</small></span></div></div></section><form className="onboarding-card" onSubmit={save}><div className="step-label"><span>1</span><div><small>START HERE</small><strong>{mode === "add" ? "Which stage is this profile in?" : "Where are you now?"}</strong></div></div><div className="stage-grid">{STAGES.map((stage) => <button type="button" className={draft.lifecycleStage === stage.id ? "selected" : ""} onClick={() => stage.id !== draft.lifecycleStage && setDraft({ ...draft, lifecycleStage: stage.id, statusSubtype: stageDefaults(stage.id, draft.displayName).statusSubtype })} key={stage.id}><span><b>{stage.label}</b><small>{stage.short}</small></span><em>{stage.coverage}</em></button>)}</div><div className="step-label second"><span>2</span><div><small>MINIMUM INPUTS</small><strong>Build your first timeline</strong></div></div><ProfileFields draft={draft} setDraft={setDraft} compact />{error && <p className="form-error">{error}</p>}<button className="primary wide" disabled={saving}>{saving ? "Building your plan…" : mode === "add" ? "Create profile & action plan" : "Create my action plan"} <Icon name="arrow" /></button><p className="form-disclaimer">Your entries are saved to your signed-in account. Start without uploading documents. This checklist is not legal advice or an eligibility decision.</p></form></div></main>;
 }
 
-function ProfileDialog({ profile, onClose, onSaved }: { profile: ImmigrationProfile; onClose: () => void; onSaved: () => Promise<void> }) {
+function ProfileDialog({ profile, canDelete, onDelete, onClose, onSaved }: { profile: ImmigrationProfile; canDelete?: boolean; onDelete?: () => Promise<void>; onClose: () => void; onSaved: () => Promise<void> }) {
   const [draft, setDraft] = useState<ImmigrationProfile>({ ...profile });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const save = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true); setError("");
-    try { await api("/api/profile", { method: "PUT", body: JSON.stringify(draft) }); await onSaved(); }
+    try { await api("/api/profile", { method: "PUT", body: JSON.stringify({ ...draft, profileId: profile.id }) }); await onSaved(); }
     catch (err) { setError(err instanceof Error ? err.message : "Unable to save profile."); setSaving(false); }
   };
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="profile-dialog" onSubmit={save} role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="dialog-head"><div><p className="eyebrow">CONFIRMED INPUTS</p><h2 id="profile-title">Immigration profile</h2></div><button type="button" className="icon-action" onClick={onClose} aria-label="Close"><Icon name="close" /></button></div><div className="stage-tabs">{STAGES.map((stage) => <button type="button" className={draft.lifecycleStage === stage.id ? "active" : ""} onClick={() => stage.id !== draft.lifecycleStage && setDraft({ ...draft, lifecycleStage: stage.id, statusSubtype: stageDefaults(stage.id, draft.displayName).statusSubtype })} key={stage.id}>{stage.label}<small>{stage.coverage}</small></button>)}</div><ProfileFields draft={draft} setDraft={setDraft} />{error && <p className="form-error">{error}</p>}<div className="dialog-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={saving}>{saving ? "Saving…" : "Save & recalculate"}</button></div></form></div>;
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="profile-dialog" onSubmit={save} role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="dialog-head"><div><p className="eyebrow">CONFIRMED INPUTS</p><h2 id="profile-title">Immigration profile</h2></div><button type="button" className="icon-action" onClick={onClose} aria-label="Close"><Icon name="close" /></button></div><div className="stage-tabs">{STAGES.map((stage) => <button type="button" className={draft.lifecycleStage === stage.id ? "active" : ""} onClick={() => stage.id !== draft.lifecycleStage && setDraft({ ...draft, lifecycleStage: stage.id, statusSubtype: stageDefaults(stage.id, draft.displayName).statusSubtype })} key={stage.id}>{stage.label}<small>{stage.coverage}</small></button>)}</div><ProfileFields draft={draft} setDraft={setDraft} />{error && <p className="form-error">{error}</p>}<div className="dialog-actions">{canDelete && onDelete && <button type="button" className="secondary danger-text" onClick={() => void onDelete()} disabled={saving}>Delete profile</button>}<button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={saving}>{saving ? "Saving…" : "Save & recalculate"}</button></div></form></div>;
 }
 
 function ProfileFields({ draft, setDraft, compact = false }: { draft: ImmigrationProfile; setDraft: (profile: ImmigrationProfile) => void; compact?: boolean }) {
@@ -330,6 +481,7 @@ function stageDefaults(stage: LifecycleStage, displayName: string): ImmigrationP
 }
 function greeting() { const hour = new Date().getHours(); return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"; }
 function firstName(name: string) { return name.trim().split(/\s+/)[0] || "there"; }
+function profileLabel(item: ImmigrationProfile, idx: number) { return item.displayName.trim() || (item.isPrimary ? "Primary profile" : `Profile ${idx + 1}`); }
 function initials(name: string) { return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "IO"; }
 function month(value: string) { return new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" }).format(new Date(`${value}T12:00:00Z`)).toUpperCase(); }
 function day(value: string) { return new Date(`${value}T12:00:00Z`).getUTCDate(); }

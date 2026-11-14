@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
+import type { ImmigrationProfile } from "../lib/profile";
 
 type Token = { id: string; label: string; scopes: "read" | "write"; createdAt: string; expiresAt: string; lastUsedAt: string | null; revokedAt: string | null };
 async function tokensApi(init?: RequestInit, query = "") {
@@ -10,7 +11,21 @@ async function tokensApi(init?: RequestInit, query = "") {
 }
 const dateTime = (date: string) => new Date(date).toLocaleString();
 
-export default function AgentSettings() {
+export default function AgentSettings({
+  profiles = [],
+  activeProfileId,
+  onSelectProfile,
+  onAddProfile,
+  onRenameProfile,
+  onDeleteProfile,
+}: {
+  profiles?: ImmigrationProfile[];
+  activeProfileId?: string;
+  onSelectProfile?: (id: string) => void;
+  onAddProfile?: () => void;
+  onRenameProfile?: (id: string, displayName: string) => Promise<void>;
+  onDeleteProfile?: (profile: ImmigrationProfile) => Promise<void>;
+}) {
   const [now] = useState(() => Date.now());
   const [tokens, setTokens] = useState<Token[]>([]);
   const [label, setLabel] = useState("");
@@ -19,6 +34,10 @@ export default function AgentSettings() {
   const [message, setMessage] = useState("");
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
+
   useEffect(() => {
     let active = true;
     tokensApi().then((data) => { if (active) { setTokens(data.tokens); setReady(true); } })
@@ -44,8 +63,49 @@ export default function AgentSettings() {
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to revoke token."); }
     finally { setBusy(false); }
   }
+  async function submitRename(event: FormEvent, id: string) {
+    event.preventDefault();
+    if (!onRenameProfile || !renameDraft.trim()) return;
+    setProfileBusy(true);
+    try {
+      await onRenameProfile(id, renameDraft.trim());
+      setRenamingId(null);
+      setRenameDraft("");
+    } finally {
+      setProfileBusy(false);
+    }
+  }
   return <div className="page agent-settings">
-    <div className="page-intro"><div><p className="eyebrow">SETTINGS</p><h1>Connect your agent</h1><p>Give your own AI agent access to your saved records and action plan.</p></div></div>
+    <div className="page-intro"><div><p className="eyebrow">SETTINGS</p><h1>Profiles & agent access</h1><p>Manage family profiles in this account and configure personal AI agent access.</p></div>{onAddProfile && <div className="intro-actions"><button type="button" className="secondary" onClick={onAddProfile}>+ Add profile</button></div>}</div>
+
+    {profiles.length > 0 && <section className="section-block profile-management">
+      <div className="section-heading"><div><p className="eyebrow">FAMILY PROFILES</p><h2>Saved profiles</h2></div><span>{profiles.length} profile{profiles.length === 1 ? "" : "s"}</span></div>
+      <div className="agent-token-list">
+        {profiles.map((item) => {
+          const itemId = item.id ?? "";
+          const isRenaming = renamingId === itemId;
+          const canDelete = !item.isPrimary && profiles.length > 1;
+          return <article key={itemId || item.displayName}>
+            <div>
+              <h3>{item.displayName || "Primary profile"} {item.isPrimary ? <span className="tag info">Primary</span> : null} {activeProfileId === itemId ? <span className="tag planning">Active</span> : null}</h3>
+              <p>Stage: {item.lifecycleStage}{item.statusSubtype ? ` · ${item.statusSubtype}` : ""}</p>
+              {isRenaming && <form className="inline-rename-form" onSubmit={(e) => void submitRename(e, itemId)}>
+                <input value={renameDraft} maxLength={100} onChange={(e) => setRenameDraft(e.target.value)} placeholder="Profile nickname" required aria-label="New profile nickname" />
+                <button type="submit" className="primary" disabled={profileBusy || !renameDraft.trim()}>Save</button>
+                <button type="button" className="secondary" onClick={() => { setRenamingId(null); setRenameDraft(""); }}>Cancel</button>
+              </form>}
+            </div>
+            <div className="agent-buttons">
+              {onSelectProfile && activeProfileId !== itemId && itemId && <button type="button" className="secondary" onClick={() => onSelectProfile(itemId)}>Switch to profile</button>}
+              {onRenameProfile && itemId && !isRenaming && <button type="button" className="secondary" onClick={() => { setRenamingId(itemId); setRenameDraft(item.displayName || ""); }}>Rename</button>}
+              {onDeleteProfile && canDelete && itemId && <button type="button" className="secondary danger-text" disabled={profileBusy} onClick={() => void onDeleteProfile(item)}>Delete</button>}
+            </div>
+          </article>;
+        })}
+      </div>
+    </section>}
+
+    <h2>Connect your agent</h2>
     <p><a href="/agents">Use with your AI agent: connection guide and starter prompt →</a></p>
     <p>Start with Read only. Read + write also allows date/status corrections and adding receipts. Tokens expire after 90 days. Revoke access here whenever you need to.</p>
     {message && <p role="status" className="agent-notice">{message}</p>}

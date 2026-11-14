@@ -2,7 +2,9 @@ export const LIFECYCLE_STAGES = ["F1", "H1B", "GREEN_CARD", "LPR", "CITIZENSHIP"
 export type LifecycleStage = (typeof LIFECYCLE_STAGES)[number];
 
 export type ImmigrationProfile = {
+  id?: string;
   owner?: string;
+  isPrimary?: boolean;
   displayName: string;
   lifecycleStage: LifecycleStage;
   statusSubtype: string;
@@ -16,6 +18,7 @@ export type ImmigrationProfile = {
   greenCardSince: string | null;
   greenCardExpirationDate: string | null;
   naturalizationBasis: string;
+  createdAt?: string;
   updatedAt?: string;
 };
 

@@ -20,12 +20,13 @@ Migration `drizzle/0002_agent_tokens.sql` adds the token table, owner/hash index
 
 | Tool | Scope | Data returned / changed |
 | --- | --- | --- |
-| `get_profile` | read | Saved profile fields; no owner or internal timestamps |
-| `get_action_plan` | read | Open web tasks: ID, title, due date, open status, official source |
-| `list_documents` | read | Type, filename, upload date only; no content, IDs or storage keys |
-| `list_cases` | read | Receipt numbers and official USCIS status links; no live status fetch |
-| `update_profile_dates` | write | Partial update to existing profile's date/status fields; returns saved fields and open actions |
-| `add_case` | write | Web receipt normalization/upsert, optional form/nickname; returns receipt and official link |
+| `list_profiles` | read | Account profiles: ID, display name, lifecycle stage, subtype, primary flag |
+| `get_profile` | read | Saved profile fields (optional `profile` nickname or ID; defaults to primary); no owner or internal timestamps |
+| `get_action_plan` | read | Open web tasks for the selected or primary profile: ID, title, due date, open status, official source |
+| `list_documents` | read | Type, filename, upload date only for the selected or primary profile; no content, IDs or storage keys |
+| `list_cases` | read | Receipt numbers and official USCIS status links for the selected or primary profile; no live status fetch |
+| `update_profile_dates` | write | Partial update to existing profile's date/status fields (optional `profile` nickname or ID); returns saved fields and open actions |
+| `add_case` | write | Web receipt normalization/upsert for the selected or primary profile, optional form/nickname; returns receipt and official link |
 
 Profile and case writes share `lib/workspace.ts` with web routes. Profile validation remains `normalizeProfile`; both web and MCP plans use `loadPlan` → `buildPlan`. Date changes naturally get new completion keys, reopening the affected task just as in the web flow. This preserves the existing behavior if a user later reverts to a previously completed date. No new eligibility engine, date formula, legal analysis or source text is introduced. A task title may already ask the user to review naturalization eligibility with official guidance; it is not a determination. Arbitrary user-entered profile text and filenames remain user data, not verified assertions or instructions.
 

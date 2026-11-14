@@ -13,7 +13,9 @@ export function ensureDatabase() {
   if (!initialization) {
     initialization = d1.batch([
       d1.prepare(`CREATE TABLE IF NOT EXISTS profiles (
-        owner text PRIMARY KEY NOT NULL,
+        id text PRIMARY KEY NOT NULL,
+        owner text NOT NULL,
+        is_primary integer DEFAULT 0 NOT NULL,
         display_name text DEFAULT '' NOT NULL,
         lifecycle_stage text NOT NULL,
         status_subtype text DEFAULT '' NOT NULL,
@@ -30,9 +32,13 @@ export function ensureDatabase() {
         created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
         updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
       )`),
+      d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS profiles_owner_id_idx ON profiles (owner, id)"),
+      d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS profiles_owner_primary_idx ON profiles (owner) WHERE is_primary = 1"),
+      d1.prepare("CREATE INDEX IF NOT EXISTS profiles_owner_idx ON profiles (owner)"),
       d1.prepare(`CREATE TABLE IF NOT EXISTS documents (
         id text PRIMARY KEY NOT NULL,
         owner text NOT NULL,
+        profile_id text DEFAULT '' NOT NULL,
         kind text DEFAULT 'Other' NOT NULL,
         filename text NOT NULL,
         mime_type text NOT NULL,
@@ -41,9 +47,11 @@ export function ensureDatabase() {
         uploaded_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
       )`),
       d1.prepare("CREATE INDEX IF NOT EXISTS documents_owner_idx ON documents (owner)"),
+      d1.prepare("CREATE INDEX IF NOT EXISTS documents_owner_profile_idx ON documents (owner, profile_id)"),
       d1.prepare(`CREATE TABLE IF NOT EXISTS tracked_cases (
         id text PRIMARY KEY NOT NULL,
         owner text NOT NULL,
+        profile_id text DEFAULT '' NOT NULL,
         receipt_number text NOT NULL,
         form_type text DEFAULT '' NOT NULL,
         nickname text DEFAULT '' NOT NULL,
@@ -51,14 +59,16 @@ export function ensureDatabase() {
         last_checked_at text,
         created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
       )`),
-      d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS tracked_cases_owner_receipt_idx ON tracked_cases (owner, receipt_number)"),
+      d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS tracked_cases_owner_profile_receipt_idx ON tracked_cases (owner, profile_id, receipt_number)"),
+      d1.prepare("CREATE INDEX IF NOT EXISTS tracked_cases_owner_profile_idx ON tracked_cases (owner, profile_id)"),
       d1.prepare(`CREATE TABLE IF NOT EXISTS completed_actions (
         id text PRIMARY KEY NOT NULL,
         owner text NOT NULL,
+        profile_id text DEFAULT '' NOT NULL,
         action_key text NOT NULL,
         completed_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
       )`),
-      d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS completed_actions_owner_key_idx ON completed_actions (owner, action_key)"),
+      d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS completed_actions_owner_profile_key_idx ON completed_actions (owner, profile_id, action_key)"),
       d1.prepare(`CREATE TABLE IF NOT EXISTS sessions (
         id text PRIMARY KEY NOT NULL,
         owner text NOT NULL,

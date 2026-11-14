@@ -1,38 +1,40 @@
-import { and, eq } from "drizzle-orm";
-import { ensureDatabase, getDb } from "../../../db";
-import { completedActions, profiles } from "../../../db/schema";
-import { buildPlan } from "../../../lib/rules";
-import type { ImmigrationProfile } from "../../../lib/profile";
 import { ownerFromRequest, unauthorized } from "../../../lib/auth";
+import { ProfileNotFound, setActionCompleted } from "../../../lib/workspace";
 
 export async function POST(request: Request) {
   const owner = await ownerFromRequest(request);
   if (!owner) return unauthorized();
 
+  const queryProfileId = new URL(request.url).searchParams.get("profileId");
+
   try {
-    await ensureDatabase();
-    const payload = (await request.json()) as { actionKey?: string; completed?: boolean };
-    if (!payload || typeof payload.completed !== "boolean") return Response.json({ error: "Completion must be true or false." }, { status: 400 });
-    const actionKey = String(payload.actionKey ?? "").trim().slice(0, 140);
-    if (!actionKey) return Response.json({ error: "Action key is required." }, { status: 400 });
-    const db = getDb();
-    const [profile] = await db.select().from(profiles).where(eq(profiles.owner, owner)).limit(1);
-    if (!profile || !buildPlan(profile as ImmigrationProfile).items.some((item) => item.id === actionKey)) {
-      return Response.json({ error: "This action changed. Refresh your plan and try again." }, { status: 400 });
-    }
-    if (payload.completed) {
-      await db.insert(completedActions).values({
-        id: crypto.randomUUID(),
-        owner,
-        actionKey,
-      }).onConflictDoNothing();
-    } else {
-      await db.delete(completedActions).where(
-        and(eq(completedActions.owner, owner), eq(completedActions.actionKey, actionKey)),
-      );
-    }
+    const payload = (await request.json()) as {
+      actionKey?: string;
+      completed?: boolean;
+      profileId?: string;
+    };
+    const profileId =
+      queryProfileId?.trim() ||
+      (typeof payload?.profileId === "string" && payload.profileId.trim()
+        ? payload.profileId.trim()
+        : null);
+    await setActionCompleted(owner, payload, profileId);
     return Response.json({ ok: true });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Unable to update action." }, { status: 500 });
+    if (error instanceof ProfileNotFound) {
+      return Response.json({ error: error.message }, { status: 404 });
+    }
+    if (
+      error instanceof Error &&
+      (error.message === "Completion must be true or false." ||
+        error.message === "Action key is required." ||
+        error.message === "This action changed. Refresh your plan and try again.")
+    ) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    return Response.json(
+      { error: error instanceof Error ? error.message : "Unable to update action." },
+      { status: 500 },
+    );
   }
 }

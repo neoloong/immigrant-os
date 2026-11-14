@@ -1,16 +1,24 @@
-import { desc, eq } from "drizzle-orm";
-import { ensureDatabase, getDb } from "../db";
-import { documents, trackedCases } from "../db/schema";
+import { ensureDatabase } from "../db";
 import { authenticateAgent, PRIVATE_HEADERS } from "./agent-tokens";
 import { normalizeProfile, LIFECYCLE_STAGES } from "./profile";
-import { loadPlan, loadProfile, saveCase, saveProfile } from "./workspace";
+import {
+  listCases,
+  listDocuments,
+  listProfiles,
+  loadPlan,
+  resolveProfile,
+  saveCase,
+  saveProfile,
+} from "./workspace";
 
 const VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
 const LIMITATION = "Saved records, dates, tasks and official sources only. No eligibility determinations, legal advice, or filing-date calculations beyond the web app.";
 const dateSchema = { type: ["string", "null"], pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Date from your records (YYYY-MM-DD); null clears it." };
+const profileProperty = { type: "string", maxLength: 100, description: "Optional profile id or nickname; defaults to your primary profile." };
 const dateFields = ["programEndDate", "eadEndDate", "i94ExpirationDate", "passportExpirationDate", "visaExpirationDate", "priorityDate", "greenCardSince", "greenCardExpirationDate"];
 const statusFields = ["lifecycleStage", "statusSubtype", "admissionBasis", "naturalizationBasis"];
 const updateProperties = {
+  profile: profileProperty,
   ...Object.fromEntries(dateFields.map((field) => [field, dateSchema])),
   lifecycleStage: { type: "string", enum: LIFECYCLE_STAGES },
   statusSubtype: { type: "string", maxLength: 40 },
@@ -23,13 +31,14 @@ function tool(name: string, description: string, write = false, properties = {},
     annotations: { readOnlyHint: !write, destructiveHint: write, idempotentHint: true, openWorldHint: false } };
 }
 export const AGENT_TOOLS = [
-  tool("get_profile", "Read your saved profile fields; these are user-entered records, not verified findings."),
-  tool("get_action_plan", "Read open tasks, dates, status and official rule sources from your web action plan. Planning reminders are not legal filing deadlines."),
-  tool("list_documents", "List document type, name and upload date only. Does not read file contents."),
-  tool("list_cases", "List your saved USCIS receipts and official status-page links. Does not fetch live statuses."),
+  tool("list_profiles", "List the profiles in your account (id, display name, lifecycle stage, and whether it is the primary profile)."),
+  tool("get_profile", "Read your saved profile fields; these are user-entered records, not verified findings.", false, { profile: profileProperty }),
+  tool("get_action_plan", "Read open tasks, dates, status and official rule sources from your web action plan. Planning reminders are not legal filing deadlines.", false, { profile: profileProperty }),
+  tool("list_documents", "List document type, name and upload date only. Does not read file contents.", false, { profile: profileProperty }),
+  tool("list_cases", "List your saved USCIS receipts and official status-page links. Does not fetch live statuses.", false, { profile: profileProperty }),
   tool("update_profile_dates", "Update only your saved date/status fields using web validation and task recalculation. Requires write scope; changed task dates reopen completion. Requires an existing profile.", true, updateProperties),
   tool("add_case", "Save a USCIS receipt to your account; optional labels follow the web flow. Requires write scope.", true,
-    { receiptNumber: { type: "string", description: "USCIS receipt: 3 letters and 10 digits (spaces/hyphens accepted)." }, formType: { type: "string", maxLength: 30 }, nickname: { type: "string", maxLength: 80 } }, ["receiptNumber"]),
+    { profile: profileProperty, receiptNumber: { type: "string", description: "USCIS receipt: 3 letters and 10 digits (spaces/hyphens accepted)." }, formType: { type: "string", maxLength: 30 }, nickname: { type: "string", maxLength: 80 } }, ["receiptNumber"]),
 ];
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -37,49 +46,90 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 const caseRecord = (row: { receiptNumber: string }) => ({ receiptNumber: row.receiptNumber,
   statusUrl: `https://egov.uscis.gov/casestatus/mycasestatus.do?appReceiptNum=${encodeURIComponent(row.receiptNumber)}` });
-async function openActions(owner: string) {
-  const plan = await loadPlan(owner);
+async function openActions(owner: string, profileId: string) {
+  const plan = await loadPlan(owner, profileId);
   return plan?.items.filter((item) => !item.completed).map((item) => ({
     id: item.id, title: item.title, dueDate: item.dueDate, status: "open", source: item.source,
   })) ?? [];
 }
 
 class ToolInputError extends Error {}
+
+async function resolveTargetProfile(owner: string, args: Record<string, unknown>, requireExisting = false) {
+  if ("profile" in args && args.profile !== undefined) {
+    if (typeof args.profile !== "string" || !args.profile.trim()) {
+      throw new ToolInputError("Enter a valid profile id or nickname.");
+    }
+    const target = await resolveProfile(owner, args.profile);
+    if (!target) throw new ToolInputError("Profile not found in your account.");
+    return target;
+  }
+  const primary = await resolveProfile(owner);
+  if (!primary && requireExisting) {
+    throw new ToolInputError("Create your profile in the web app first.");
+  }
+  return primary;
+}
+
 async function executeTool(name: string, owner: string, args: Record<string, unknown>) {
+  if (name === "list_profiles") {
+    const rows = await listProfiles(owner);
+    return {
+      profiles: rows.map((row) => ({
+        id: row.id,
+        displayName: row.displayName,
+        lifecycleStage: row.lifecycleStage,
+        statusSubtype: row.statusSubtype,
+        isPrimary: row.isPrimary,
+      })),
+    };
+  }
   if (name === "get_profile") {
-    const profile = await loadProfile(owner);
+    const profile = await resolveTargetProfile(owner, args);
     return { profile: profile ? normalizeProfile(profile) : null };
   }
-  if (name === "get_action_plan") return { actions: await openActions(owner) };
+  if (name === "get_action_plan") {
+    const profile = await resolveTargetProfile(owner, args);
+    return { actions: profile ? await openActions(owner, profile.id) : [] };
+  }
   if (name === "list_documents") {
     await ensureDatabase();
-    return { documents: await getDb().select({ type: documents.kind, name: documents.filename, date: documents.uploadedAt })
-      .from(documents).where(eq(documents.owner, owner)).orderBy(desc(documents.uploadedAt)) };
+    const profile = await resolveTargetProfile(owner, args);
+    const docs = await listDocuments(owner, profile?.id ?? null);
+    return {
+      documents: docs.map((doc) => ({
+        type: doc.kind,
+        name: doc.filename,
+        date: doc.uploadedAt,
+      })),
+    };
   }
   if (name === "list_cases") {
     await ensureDatabase();
-    const rows = await getDb().select({ receiptNumber: trackedCases.receiptNumber }).from(trackedCases)
-      .where(eq(trackedCases.owner, owner)).orderBy(desc(trackedCases.createdAt));
+    const profile = await resolveTargetProfile(owner, args);
+    const rows = await listCases(owner, profile?.id ?? null);
     return { cases: rows.map(caseRecord) };
   }
   if (name === "update_profile_dates") {
-    if (!Object.keys(args).length) throw new ToolInputError("Provide at least one date or status field.");
-    for (const [key, value] of Object.entries(args)) {
+    const { profile: _profileArg, ...patch } = args;
+    if (!Object.keys(patch).length) throw new ToolInputError("Provide at least one date or status field.");
+    for (const [key, value] of Object.entries(patch)) {
       if (dateFields.includes(key) && value !== null && (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value))) throw new ToolInputError("Use YYYY-MM-DD dates or null.");
       if (statusFields.includes(key) && typeof value !== "string") throw new ToolInputError("Status fields must be strings.");
     }
-    const current = await loadProfile(owner);
+    const current = await resolveTargetProfile(owner, args, true);
     if (!current) throw new ToolInputError("Create your profile in the web app first.");
     let normalized;
-    try { normalized = normalizeProfile({ ...current, ...args }); }
+    try { normalized = normalizeProfile({ ...current, ...patch }); }
     catch { throw new ToolInputError("Invalid profile date or status. Check the web profile fields."); }
     // saveProfile performs the same normalization again at the persistence boundary.
-    await saveProfile(owner, normalized);
-    return { profile: normalized, actions: await openActions(owner) };
+    await saveProfile(owner, normalized, { profileId: current.id });
+    return { profile: normalized, actions: await openActions(owner, current.id) };
   }
   if (typeof args.receiptNumber !== "string" || !/^[A-Z]{3}\d{10}$/.test(args.receiptNumber.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()) ||
     ["formType", "nickname"].some((key) => key in args && typeof args[key] !== "string")) throw new ToolInputError("Enter a USCIS receipt (3 letters and 10 digits) and optional text labels.");
-  return { case: caseRecord(await saveCase(owner, args)) };
+  const target = await resolveTargetProfile(owner, args);
+  return { case: caseRecord(await saveCase(owner, args, target?.id ?? null)) };
 }
 
 // Stateless Streamable HTTP, pinned to the initialize-based MCP revisions.
