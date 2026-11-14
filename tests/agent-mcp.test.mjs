@@ -161,8 +161,8 @@ test("agent token lifecycle, MCP protocol, account isolation and compliance", as
       assert.equal((await good(rpc(write.token, "tools/call", { name: "add_case", arguments: { receiptNumber: "BAD" } }))).result.isError, true);
     });
     await t.test("all stages expose only existing web tasks/dates/sources and no new eligibility assertions", async () => {
-      for (const lifecycleStage of ["F1", "H1B", "GREEN_CARD", "LPR", "CITIZENSHIP"]) {
-        await good(web(a, "/api/profile", "PUT", { lifecycleStage, admissionBasis: "FIXED_DATE", programEndDate: "2027-05-30", i94ExpirationDate: "2027-06-30", greenCardSince: "2020-01-01", greenCardExpirationDate: "2030-01-01", priorityDate: "2019-01-01", eadEndDate: "2027-02-28", passportExpirationDate: "2028-02-29" }));
+      for (const lifecycleStage of ["F1", "H1B", "VISITOR", "GREEN_CARD", "LPR", "CITIZENSHIP"]) {
+        await good(web(a, "/api/profile", "PUT", { lifecycleStage, admissionBasis: "FIXED_DATE", programEndDate: "2027-05-30", i94ExpirationDate: "2027-06-30", greenCardSince: "2020-01-01", greenCardExpirationDate: "2030-01-01", priorityDate: "2019-01-01", eadEndDate: "2027-02-28", passportExpirationDate: "2028-02-29", visaExpirationDate: "2030-05-15" }));
         const plan = (await good(web(a, "/api/plan"))).plan;
         const actions = (await call(read.token, "get_action_plan")).actions;
         assert.equal(actions.length, plan.items.filter((item) => !item.completed).length);
@@ -174,6 +174,23 @@ test("agent token lifecycle, MCP protocol, account isolation and compliance", as
           assert.doesNotMatch(JSON.stringify(action), /you (are eligible|qualify|should file)|earliest filing date|legal advice is/i);
         }
       }
+      // Also verify MCP profile tools flow with VISITOR secondary profile isolation and I-94 reopening
+      const created = (await good(web(a, "/api/profile", "POST", { displayName: "Visitor MCP", lifecycleStage: "VISITOR", i94ExpirationDate: "2027-09-01", passportExpirationDate: "2029-12-31", visaExpirationDate: "2031-01-01" }))).profile;
+      const listed = await call(read.token, "list_profiles");
+      assert.ok(listed.profiles.some((p) => p.id === created.id && p.lifecycleStage === "VISITOR"));
+      const fetched = await call(read.token, "get_profile", { profile: "Visitor MCP" });
+      assert.equal(fetched.profile.lifecycleStage, "VISITOR");
+      assert.equal(fetched.profile.i94ExpirationDate, "2027-09-01");
+      assert.equal(fetched.profile.visaExpirationDate, "2031-01-01");
+      const visitorActions = (await call(read.token, "get_action_plan", { profile: "Visitor MCP" })).actions;
+      assert.equal(visitorActions.length, 2);
+      const extKey = visitorActions.find((item) => item.id.startsWith("visitor-i94-end:")).id;
+      await good(web(a, "/api/actions", "POST", { profileId: created.id, actionKey: extKey, completed: true }));
+      assert.equal((await call(read.token, "get_action_plan", { profile: created.id })).actions.length, 1);
+      const updated = await call(write.token, "update_profile_dates", { profile: "Visitor MCP", i94ExpirationDate: "2028-03-01" });
+      assert.equal(updated.profile.i94ExpirationDate, "2028-03-01");
+      assert.equal(updated.actions.length, 2);
+      assert.equal(updated.actions.find((item) => item.id.startsWith("visitor-i94-end:")).dueDate, "2028-03-01");
     });
     await t.test("session/Access users manage their own tokens; MCP bypasses only the web bridge", async (t) => {
       const access = accessFixture(t);

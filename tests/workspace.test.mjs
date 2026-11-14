@@ -71,5 +71,70 @@ test("saved workspace survives requests and stays isolated between accounts", as
       await json(a, `/api/documents?id=${item.id}`, "DELETE");
       assert.equal((await call(a, `/api/documents?download=${item.id}`)).status, 404);
     });
+    await t.test("VISITOR profile renders plan with sourced actions, reopens extension action on I-94 date change, and stays isolated per profile", async () => {
+      const visitor1 = (await json(a, "/api/profile", "POST", {
+        displayName: "Visiting Parent A",
+        lifecycleStage: "VISITOR",
+        i94ExpirationDate: "2027-04-15",
+        passportExpirationDate: "2029-10-01",
+        visaExpirationDate: "2031-05-20",
+      })).profile;
+      const visitor2 = (await json(a, "/api/profile", "POST", {
+        displayName: "Visiting Parent B",
+        lifecycleStage: "VISITOR",
+        i94ExpirationDate: "2027-08-01",
+        passportExpirationDate: "2030-01-15",
+      })).profile;
+      assert.notEqual(visitor1.id, visitor2.id);
+
+      let plan1 = (await json(a, `/api/plan?profileId=${encodeURIComponent(visitor1.id)}`)).plan;
+      assert.equal(plan1.stageLabel, "Visitor (B1/B2)");
+      assert.deepEqual(plan1.missingFields, []);
+      assert.equal(plan1.items.length, 2);
+
+      const i94Action = plan1.items.find((item) => item.id.startsWith("visitor-i94-end:"));
+      const passportAction = plan1.items.find((item) => item.id.startsWith("universal-passport-expiry:"));
+      assert.ok(i94Action);
+      assert.equal(i94Action.id, "visitor-i94-end:2027-04-15");
+      assert.equal(i94Action.dueDate, "2027-04-15");
+      assert.match(i94Action.description, /I-539/);
+      assert.equal(i94Action.source.url, "https://www.uscis.gov/visit-the-united-states/extend-your-stay");
+      assert.ok(passportAction);
+      assert.equal(passportAction.id, "universal-passport-expiry:2029-10-01");
+      assert.equal(passportAction.dueDate, "2029-10-01");
+      assert.match(new URL(passportAction.source.url).hostname, /^(www\.uscis\.gov|travel\.state\.gov)$/);
+
+      // Completing visitor1's I-94 extension action does not affect visitor2 or primary profile
+      await json(a, "/api/actions", "POST", { profileId: visitor1.id, actionKey: i94Action.id, completed: true });
+      plan1 = (await json(a, `/api/plan?profileId=${encodeURIComponent(visitor1.id)}`)).plan;
+      assert.equal(plan1.items.find((item) => item.id === i94Action.id).completed, true);
+
+      const plan2 = (await json(a, `/api/plan?profileId=${encodeURIComponent(visitor2.id)}`)).plan;
+      assert.equal(plan2.items.find((item) => item.id.startsWith("visitor-i94-end:")).dueDate, "2027-08-01");
+      assert.equal(plan2.items.find((item) => item.id.startsWith("visitor-i94-end:")).completed, false);
+      assert.equal((await json(a, "/api/plan")).plan.stageLabel, "H-1B / H-4");
+
+      // Changing I-94 date on visitor1 reopens the extension action while keeping passport completion isolated
+      await json(a, "/api/actions", "POST", { profileId: visitor1.id, actionKey: passportAction.id, completed: true });
+      await json(a, "/api/profile", "PUT", {
+        profileId: visitor1.id,
+        displayName: "Visiting Parent A",
+        lifecycleStage: "VISITOR",
+        i94ExpirationDate: "2027-10-15",
+        passportExpirationDate: "2029-10-01",
+        visaExpirationDate: "2031-05-20",
+      });
+      plan1 = (await json(a, `/api/plan?profileId=${encodeURIComponent(visitor1.id)}`)).plan;
+      const reopenedI94 = plan1.items.find((item) => item.id.startsWith("visitor-i94-end:"));
+      assert.equal(reopenedI94.id, "visitor-i94-end:2027-10-15");
+      assert.equal(reopenedI94.completed, false);
+      assert.equal(plan1.items.find((item) => item.id === passportAction.id).completed, true);
+
+      // Cases and documents stay isolated per VISITOR profile
+      await json(a, "/api/cases", "POST", { profileId: visitor1.id, receiptNumber: "IOE9999999991", formType: "I-539", nickname: "Parent A extension" });
+      assert.equal((await json(a, `/api/cases?profileId=${encodeURIComponent(visitor1.id)}`)).cases.length, 1);
+      assert.equal((await json(a, `/api/cases?profileId=${encodeURIComponent(visitor2.id)}`)).cases.length, 0);
+      assert.equal((await json(a, "/api/cases")).cases.length, 0);
+    });
   } finally { await mf.dispose(); }
 });

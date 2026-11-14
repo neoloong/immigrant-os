@@ -63,6 +63,16 @@ const SOURCES = {
     url: "https://www.uscis.gov/n-400",
     ruleVersion: "Official reference · check current instructions",
   },
+  i539: {
+    label: "USCIS: Extend Your Stay (Form I-539)",
+    url: "https://www.uscis.gov/visit-the-united-states/extend-your-stay",
+    ruleVersion: "Official reference · check current instructions",
+  },
+  passport: {
+    label: "Department of State: Visitor Visa & Passport Validity",
+    url: "https://travel.state.gov/content/travel/en/us-visas/tourism-visit/visitor.html",
+    ruleVersion: "Official reference · check current instructions",
+  },
 };
 
 export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] = []): PlanResult {
@@ -132,6 +142,22 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
     }
   }
 
+  if (profile.lifecycleStage === "VISITOR") {
+    if (!profile.i94ExpirationDate) missingFields.push("I-94 admit-until date");
+    if (profile.i94ExpirationDate) {
+      add({
+        id: "visitor-i94-end",
+        title: "I-94 admit-until date (Form I-539 extension scheduling)",
+        description: "Scheduling information only: USCIS guidance states that a visitor who needs to stay beyond the CBP admit-until date on Form I-94 files Form I-539 before the current authorized stay expires. The visa expiration date is an entry-document date, not the authorized stay period.",
+        dueDate: profile.i94ExpirationDate,
+        severity: "critical",
+        confidence: "needs-review",
+        basis: [`I-94 admit-until date: ${formatDate(profile.i94ExpirationDate)}`],
+        source: SOURCES.i539,
+      });
+    }
+  }
+
   if (profile.lifecycleStage === "GREEN_CARD") {
     if (!profile.priorityDate) missingFields.push("Priority date");
     add({
@@ -180,7 +206,7 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
     }
   }
 
-  if (profile.eadEndDate) {
+  if (profile.eadEndDate && profile.lifecycleStage !== "VISITOR") {
     add({
       id: "ead-expiry", title: "EAD expiration date",
       description: "Date printed on your EAD. Any extension of work authorization depends on your category and circumstances; verify it separately.",
@@ -198,7 +224,7 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
       severity: "important",
       confidence: "needs-review",
       basis: [`Passport expiration: ${formatDate(profile.passportExpirationDate)}`],
-      source: profile.lifecycleStage === "F1" ? SOURCES.opt : SOURCES.h1b,
+      source: profile.lifecycleStage === "F1" ? SOURCES.opt : profile.lifecycleStage === "VISITOR" ? SOURCES.passport : SOURCES.h1b,
     });
   }
 
@@ -213,6 +239,7 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
   const labels: Record<ImmigrationProfile["lifecycleStage"], string> = {
     F1: "F-1 / OPT",
     H1B: "H-1B / H-4",
+    VISITOR: "Visitor (B1/B2)",
     GREEN_CARD: "Green card process",
     LPR: "Permanent resident",
     CITIZENSHIP: "Citizenship",

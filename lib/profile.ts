@@ -1,4 +1,4 @@
-export const LIFECYCLE_STAGES = ["F1", "H1B", "GREEN_CARD", "LPR", "CITIZENSHIP"] as const;
+export const LIFECYCLE_STAGES = ["F1", "H1B", "VISITOR", "GREEN_CARD", "LPR", "CITIZENSHIP"] as const;
 export type LifecycleStage = (typeof LIFECYCLE_STAGES)[number];
 
 export type ImmigrationProfile = {
