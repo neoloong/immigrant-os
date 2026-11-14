@@ -11,7 +11,7 @@ import { accessFixture } from "./helpers/access.mjs";
 test("agent token lifecycle, MCP protocol, account isolation and compliance", async (t) => {
   const DB = sqliteD1();
   const env = { DB, BUCKET: {}, ASSETS: { fetch: () => new Response("Not found", { status: 404 }) }, AGENT_MCP_ENABLED: "true" };
-  for (const name of ["0000_new_maria_hill", "0001_round_ted_forrester", "0002_agent_tokens"]) DB.exec(await readFile(new URL(`../drizzle/${name}.sql`, import.meta.url), "utf8"));
+  for (const name of ["0000_new_maria_hill", "0001_round_ted_forrester", "0002_agent_tokens", "0003_family_profiles"]) DB.exec(await readFile(new URL(`../drizzle/${name}.sql`, import.meta.url), "utf8"));
   const ctx = { waitUntil() {}, passThroughOnException() {} };
   const a = "agent-a@example.test", b = "agent-b@example.test";
   const web = (owner, path, method = "GET", body, headers = {}, overrides = {}) => worker.fetch(new Request(`https://test.local${path}`, {
@@ -86,8 +86,8 @@ test("agent token lifecycle, MCP protocol, account isolation and compliance", as
       }
       assert.equal((await good(rpc(read.token, "initialize"))).error.code, -32602);
       const readerTools = (await good(rpc(read.token, "tools/list"))).result.tools;
-      assert.equal(readerTools.length, 4);
-      const writerTools = (await good(rpc(write.token, "tools/list"))).result.tools; assert.equal(writerTools.length, 6);
+      assert.equal(readerTools.length, 5);
+      const writerTools = (await good(rpc(write.token, "tools/list"))).result.tools; assert.equal(writerTools.length, 7);
       for (const tool of writerTools) { assert.match(tool.description, /No eligibility determinations, legal advice/); assert.equal(tool.inputSchema.additionalProperties, false); }
       assert.ok((await DB.prepare("SELECT last_used_at FROM agent_tokens WHERE id = ?").bind(read.agentToken.id).first()).last_used_at);
       for (const name of ["update_profile_dates", "add_case"]) assert.equal((await good(rpc(read.token, "tools/call", { name, arguments: {} }))).error.code, -32003);
@@ -118,7 +118,7 @@ test("agent token lifecycle, MCP protocol, account isolation and compliance", as
       await good(web(b, "/api/profile", "PUT", { displayName: "Account B", lifecycleStage: "F1", programEndDate: "2029-05-31" }));
       const spoof = { "oai-authenticated-user-email": b, cookie: "immigrant_session=fake" };
       assert.equal((await call(read.token, "get_profile", {}, spoof)).profile.displayName, "Account A");
-      for (const name of ["get_profile", "get_action_plan", "list_documents", "list_cases", "update_profile_dates", "add_case"]) {
+      for (const name of ["list_profiles", "get_profile", "get_action_plan", "list_documents", "list_cases", "update_profile_dates", "add_case"]) {
         const rejected = await good(rpc(write.token, "tools/call", { name, arguments: { owner: b, receiptNumber: "IOE1234567890" } }));
         assert.equal(rejected.error.code, -32602);
       }
