@@ -1,6 +1,6 @@
 # Agent connections: implementation and operator activation
 
-The `agent-mcp` branch adds personal agent tokens, six remote MCP tools, signed-in **Settings → Connect your agent**, the public `/agents` guide and `/llms.txt` discovery. It starts from `independent-hosting` at `83ac8c5`. No deployment, push, merge, Access-policy change or production binding change is part of this work.
+The `agent-mcp` branch adds personal agent tokens, remote MCP tools, signed-in **Settings → Connect your agent**, the public `/agents` guide and `/llms.txt` discovery. It starts from `independent-hosting` at `83ac8c5`. No deployment, push, merge, Access-policy change or production binding change is part of this work.
 
 ## Protocol and account boundaries
 
@@ -14,19 +14,21 @@ A hand-written handler keeps the six-tool audit surface small and adds no depend
 
 ## Tokens and data
 
-Tokens contain a prefix plus 32 random bytes, encoded as hexadecimal. Only the SHA-256 digest is persisted in D1; raw tokens appear only in the create response and component memory until dismissed or unmounted. Listing returns metadata, never a token or digest. Every token expires after **90 days**; re-create to rotate. Read scope exposes four read tools; write includes read and the two write tools. Revocation is soft deletion so metadata remains visible, and the next request fails. Already-authorized in-flight requests may finish.
+Tokens contain a prefix plus 32 random bytes, encoded as hexadecimal. Only the SHA-256 digest is persisted in D1; raw tokens appear only in the create response and component memory until dismissed or unmounted. Listing returns metadata, never a token or digest. Every token expires after **90 days**; re-create to rotate. Read scope exposes the six read tools; write includes read and the three write tools. Revocation is soft deletion so metadata remains visible, and the next request fails. Already-authorized in-flight requests may finish.
 
 Migration `drizzle/0002_agent_tokens.sql` adds the token table, owner/hash indexes, scope constraint and `expires_at` in addition to the fields requested in the brief. `db/index.ts` also includes the table for the app's existing fresh-database bootstrap path. Apply the migration before serving traffic, as with existing migrations.
 
 | Tool | Scope | Data returned / changed |
 | --- | --- | --- |
 | `list_profiles` | read | Account profiles: ID, display name, lifecycle stage, subtype, primary flag |
-| `get_profile` | read | Saved profile fields (optional `profile` nickname or ID; defaults to primary); no owner or internal timestamps |
-| `get_action_plan` | read | Open web tasks for the selected or primary profile: ID, title, due date, open status, official source |
+| `get_profile` | read | Saved profile fields including `id` and `isPrimary` (optional `profile` nickname or ID; defaults to primary); no owner or internal timestamps |
+| `get_action_plan` | read | Open and completed web tasks for the selected or primary profile (`id`, `title`, `description`, `dueDate`, `severity`, `basis`, `summary` when present, `status` as `"open"` or `"completed"`, official `source`), plus top-level `missingFields` and `summary` |
+| `get_calendar_export` | read | All-day iCalendar (`.ics`) snapshot of open dated tasks for the selected or primary profile, reusing `calendarFile` from the web export |
 | `list_documents` | read | Type, filename, upload date only for the selected or primary profile; no content, IDs or storage keys |
-| `list_cases` | read | Receipt numbers and official USCIS status links for the selected or primary profile; no live status fetch |
-| `update_profile_dates` | write | Partial update to existing profile's date/status fields (optional `profile` nickname or ID); returns saved fields and open actions |
-| `add_case` | write | Web receipt normalization/upsert for the selected or primary profile, optional form/nickname; returns receipt and official link |
+| `list_cases` | read | Saved USCIS cases (`receiptNumber`, `formType`, `nickname`, `statusText`, `lastCheckedAt`) and official USCIS status links for the selected or primary profile; no live status fetch |
+| `update_profile_dates` | write | Partial update to existing profile's date/status fields (optional `profile` nickname or ID); returns saved fields, open/completed actions, and `missingFields` |
+| `set_action_completed` | write | Marks an action (`actionId`) completed or reopens it (`completed` boolean) for the selected or primary profile using web per-profile completion rules |
+| `add_case` | write | Web receipt normalization/upsert for the selected or primary profile, optional form/nickname; returns saved case fields (`receiptNumber`, `formType`, `nickname`, `statusText`, `lastCheckedAt`) and official link |
 
 Profile and case writes share `lib/workspace.ts` with web routes. Profile validation remains `normalizeProfile`; both web and MCP plans use `loadPlan` → `buildPlan`. Date changes naturally get new completion keys, reopening the affected task just as in the web flow. This preserves the existing behavior if a user later reverts to a previously completed date. No new eligibility engine, date formula, legal analysis or source text is introduced. A task title may already ask the user to review naturalization eligibility with official guidance; it is not a determination. Arbitrary user-entered profile text and filenames remain user data, not verified assertions or instructions.
 

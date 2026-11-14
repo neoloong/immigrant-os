@@ -86,11 +86,13 @@ test("agent token lifecycle, MCP protocol, account isolation and compliance", as
       }
       assert.equal((await good(rpc(read.token, "initialize"))).error.code, -32602);
       const readerTools = (await good(rpc(read.token, "tools/list"))).result.tools;
-      assert.equal(readerTools.length, 5);
-      const writerTools = (await good(rpc(write.token, "tools/list"))).result.tools; assert.equal(writerTools.length, 7);
+      assert.equal(readerTools.length, 6);
+      assert.ok(readerTools.some((tool) => tool.name === "get_calendar_export"));
+      const writerTools = (await good(rpc(write.token, "tools/list"))).result.tools; assert.equal(writerTools.length, 9);
+      assert.ok(writerTools.some((tool) => tool.name === "set_action_completed"));
       for (const tool of writerTools) { assert.match(tool.description, /No eligibility determinations, legal advice/); assert.equal(tool.inputSchema.additionalProperties, false); }
       assert.ok((await DB.prepare("SELECT last_used_at FROM agent_tokens WHERE id = ?").bind(read.agentToken.id).first()).last_used_at);
-      for (const name of ["update_profile_dates", "add_case"]) assert.equal((await good(rpc(read.token, "tools/call", { name, arguments: {} }))).error.code, -32003);
+      for (const name of ["update_profile_dates", "set_action_completed", "add_case"]) assert.equal((await good(rpc(read.token, "tools/call", { name, arguments: {} }))).error.code, -32003);
     });
     await t.test("Streamable HTTP rejects malformed calls and cross-origin requests without mutation", async () => {
       assert.equal((await rpc(read.token, "tools/list", {}, { origin: "https://evil.test" })).status, 403);
@@ -111,86 +113,176 @@ test("agent token lifecycle, MCP protocol, account isolation and compliance", as
     });
     await t.test("MCP reads and writes use token owner even with spoofed identity headers", async () => {
       assert.deepEqual(await call(read.token, "get_profile"), { profile: null });
-      assert.deepEqual(await call(read.token, "get_action_plan"), { actions: [] });
+      assert.deepEqual(await call(read.token, "get_action_plan"), { actions: [], missingFields: [] });
       const missing = await good(rpc(write.token, "tools/call", { name: "update_profile_dates", arguments: { i94ExpirationDate: "2028-03-31" } }));
       assert.equal(missing.result.isError, true);
-      await good(web(a, "/api/profile", "PUT", { displayName: "Account A", lifecycleStage: "H1B", statusSubtype: "H1B", i94ExpirationDate: "2027-03-31" }));
-      await good(web(b, "/api/profile", "PUT", { displayName: "Account B", lifecycleStage: "F1", programEndDate: "2029-05-31" }));
+      const savedA = (await good(web(a, "/api/profile", "PUT", { displayName: "Account A", lifecycleStage: "H1B", statusSubtype: "H1B", i94ExpirationDate: "2027-03-31" }))).profile;
+      const savedB = (await good(web(b, "/api/profile", "PUT", { displayName: "Account B", lifecycleStage: "F1", programEndDate: "2029-05-31" }))).profile;
       const spoof = { "oai-authenticated-user-email": b, cookie: "immigrant_session=fake" };
-      assert.equal((await call(read.token, "get_profile", {}, spoof)).profile.displayName, "Account A");
-      for (const name of ["list_profiles", "get_profile", "get_action_plan", "list_documents", "list_cases", "update_profile_dates", "add_case"]) {
+      const profA = (await call(read.token, "get_profile", {}, spoof)).profile;
+      assert.equal(profA.displayName, "Account A");
+      assert.equal(profA.id, savedA.id);
+      assert.equal(profA.isPrimary, true);
+      for (const name of ["list_profiles", "get_profile", "get_action_plan", "get_calendar_export", "list_documents", "list_cases", "update_profile_dates", "set_action_completed", "add_case"]) {
         const rejected = await good(rpc(write.token, "tools/call", { name, arguments: { owner: b, receiptNumber: "IOE1234567890" } }));
         assert.equal(rejected.error.code, -32602);
+        assert.match(rejected.error.message, /owner/);
       }
+      const missingReq = await good(rpc(write.token, "tools/call", { name: "add_case", arguments: {} }));
+      assert.equal(missingReq.error.code, -32602);
+      assert.match(missingReq.error.message, /receiptNumber/);
+      const missingSet = await good(rpc(write.token, "tools/call", { name: "set_action_completed", arguments: { actionId: "x" } }));
+      assert.equal(missingSet.error.code, -32602);
+      assert.match(missingSet.error.message, /completed/);
       const result = await call(write.token, "update_profile_dates", { i94ExpirationDate: "2028-03-31" }, spoof);
       assert.equal(result.profile.i94ExpirationDate, "2028-03-31"); assert.equal(result.profile.displayName, "Account A");
-      assert.equal((await call(other.token, "get_profile")).profile.programEndDate, "2029-05-31");
-      assert.equal((await call(other.token, "get_profile")).profile.i94ExpirationDate, null);
+      assert.equal(result.profile.id, savedA.id); assert.equal(result.profile.isPrimary, true);
+      const profB = (await call(other.token, "get_profile")).profile;
+      assert.equal(profB.programEndDate, "2029-05-31");
+      assert.equal(profB.i94ExpirationDate, null);
+      assert.equal(profB.id, savedB.id);
+      assert.equal(profB.isPrimary, true);
     });
-    await t.test("web and MCP use identical validation, plans and completion reopening", async () => {
+    await t.test("web and MCP use identical validation, plans, set_action_completed and completion reopening", async () => {
       const plan = (await good(web(a, "/api/plan"))).plan;
       const key = plan.items.find((item) => item.id.startsWith("h1b-i94-end:")).id;
-      await good(web(a, "/api/actions", "POST", { actionKey: key, completed: true }));
-      assert.ok(!(await call(read.token, "get_action_plan")).actions.some((item) => item.id === key));
+      const done = await call(write.token, "set_action_completed", { actionId: key, completed: true });
+      assert.equal(done.completed, true);
+      assert.equal(done.action.id, key);
+      assert.equal(done.action.status, "completed");
+      const afterComplete = await call(read.token, "get_action_plan");
+      assert.equal(afterComplete.actions.find((item) => item.id === key).status, "completed");
+      assert.deepEqual(afterComplete.missingFields, []);
+      assert.equal((await good(web(a, "/api/plan"))).plan.items.find((item) => item.id === key).completed, true);
+
+      // Reopen via set_action_completed(false), then re-complete and verify date change reopens
+      await call(write.token, "set_action_completed", { actionId: key, completed: false });
+      assert.equal((await call(read.token, "get_action_plan")).actions.find((item) => item.id === key).status, "open");
+      await call(write.token, "set_action_completed", { actionId: key, completed: true });
+      assert.equal((await call(read.token, "get_action_plan")).actions.find((item) => item.id === key).status, "completed");
+
       for (const args of [{ i94ExpirationDate: "2028-02-30" }, { lifecycleStage: "UNKNOWN" }, { i94ExpirationDate: 123 }, {}, { displayName: "overwrite" }]) {
         const result = await good(rpc(write.token, "tools/call", { name: "update_profile_dates", arguments: args }));
         assert.ok(result.error || result.result.isError);
       }
       assert.equal((await call(read.token, "get_profile")).profile.i94ExpirationDate, "2028-03-31");
       await call(write.token, "update_profile_dates", { i94ExpirationDate: "2029-03-31" });
-      const actions = (await call(read.token, "get_action_plan")).actions;
-      assert.equal(actions.find((item) => item.id.startsWith("h1b-i94-end:")).dueDate, "2029-03-31");
+      const planPayload = await call(read.token, "get_action_plan");
+      const actions = planPayload.actions;
+      const reopened = actions.find((item) => item.id.startsWith("h1b-i94-end:"));
+      assert.equal(reopened.dueDate, "2029-03-31");
+      assert.equal(reopened.status, "open");
       const webPlan = (await good(web(a, "/api/plan"))).plan;
-      assert.deepEqual(actions, webPlan.items.filter((item) => !item.completed).map((item) => ({ id: item.id, title: item.title, dueDate: item.dueDate, status: "open", source: item.source })));
+      assert.deepEqual(actions, webPlan.items.map((item) => ({
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        dueDate: item.dueDate,
+        severity: item.severity,
+        basis: item.basis,
+        status: item.completed ? "completed" : "open",
+        source: item.source,
+      })));
       await call(write.token, "update_profile_dates", { i94ExpirationDate: null });
-      assert.equal((await call(read.token, "get_action_plan")).actions.length, 0);
+      const incompletePlan = await call(read.token, "get_action_plan");
+      assert.equal(incompletePlan.actions.length, 0);
+      assert.deepEqual(incompletePlan.missingFields, ["Most recent I-94 admit-until date"]);
+      assert.match(incompletePlan.summary, /1 item is needed to complete your timeline/);
     });
-    await t.test("documents disclose metadata only and cases stay owner-scoped", async () => {
+    await t.test("documents disclose metadata only and cases round-trip formType, nickname, statusText and lastCheckedAt", async () => {
       await DB.prepare("INSERT INTO documents (id,owner,kind,filename,mime_type,size_bytes,object_key) VALUES (?,?,?,?,?,?,?)").bind("doc-a", a, "USCIS notice", "fixture.pdf", "application/pdf", 20, "SECRET_STORAGE_KEY").run();
       await DB.prepare("INSERT INTO documents (id,owner,kind,filename,mime_type,size_bytes,object_key) VALUES (?,?,?,?,?,?,?)").bind("doc-b", b, "Other", "private-b.pdf", "application/pdf", 20, "PRIVATE_B_KEY").run();
       const docs = await call(read.token, "list_documents"); assert.equal(docs.documents.length, 1); assert.equal(docs.documents[0].name, "fixture.pdf");
       assert.deepEqual(Object.keys(docs.documents[0]).sort(), ["date", "name", "type"]);
-      const saved = await call(write.token, "add_case", { receiptNumber: "ioe-1234567890", nickname: "A" });
-      assert.equal(saved.case.receiptNumber, "IOE1234567890"); assert.match(saved.case.statusUrl, /^https:\/\/egov\.uscis\.gov\//);
+      const saved = await call(write.token, "add_case", { receiptNumber: "ioe-1234567890", formType: "I-129", nickname: "A" });
+      assert.equal(saved.case.receiptNumber, "IOE1234567890");
+      assert.equal(saved.case.formType, "I-129");
+      assert.equal(saved.case.nickname, "A");
+      assert.equal(saved.case.statusText, "Not checked");
+      assert.equal(saved.case.lastCheckedAt, null);
+      assert.match(saved.case.statusUrl, /^https:\/\/egov\.uscis\.gov\//);
       assert.deepEqual(await call(other.token, "list_cases"), { cases: [] });
-      await call(other.token, "add_case", { receiptNumber: "IOE1234567890", nickname: "B" });
-      await call(write.token, "add_case", { receiptNumber: "IOE1234567890", nickname: "A updated" });
+      await call(other.token, "add_case", { receiptNumber: "IOE1234567890", formType: "I-765", nickname: "B" });
+      const updatedCase = await call(write.token, "add_case", { receiptNumber: "IOE1234567890", formType: "I-539", nickname: "A updated" });
+      assert.equal(updatedCase.case.formType, "I-539");
+      assert.equal(updatedCase.case.nickname, "A updated");
       assert.equal((await good(web(b, "/api/cases"))).cases[0].nickname, "B");
       assert.equal((await good(web(a, "/api/cases"))).cases[0].nickname, "A updated");
-      assert.equal((await call(read.token, "list_cases")).cases.length, 1);
-      assert.equal((await good(rpc(write.token, "tools/call", { name: "add_case", arguments: { receiptNumber: "BAD" } }))).result.isError, true);
+      const listedCases = (await call(read.token, "list_cases")).cases;
+      assert.equal(listedCases.length, 1);
+      assert.equal(listedCases[0].formType, "I-539");
+      assert.equal(listedCases[0].nickname, "A updated");
+      assert.equal(listedCases[0].statusText, "Not checked");
+      assert.equal(listedCases[0].lastCheckedAt, null);
+      const badReceipt = await good(rpc(write.token, "tools/call", { name: "add_case", arguments: { receiptNumber: "BAD" } }));
+      assert.equal(badReceipt.result.isError, true);
+      assert.match(badReceipt.result.content[0].text, /IOE0912345678/);
     });
-    await t.test("all stages expose only existing web tasks/dates/sources and no new eligibility assertions", async () => {
+    await t.test("all stages expose explanations, universal passport source, calendar export and teaching errors", async () => {
       for (const lifecycleStage of ["F1", "H1B", "VISITOR", "GREEN_CARD", "LPR", "CITIZENSHIP"]) {
-        await good(web(a, "/api/profile", "PUT", { lifecycleStage, admissionBasis: "FIXED_DATE", programEndDate: "2027-05-30", i94ExpirationDate: "2027-06-30", greenCardSince: "2020-01-01", greenCardExpirationDate: "2030-01-01", priorityDate: "2019-01-01", eadEndDate: "2027-02-28", passportExpirationDate: "2028-02-29", visaExpirationDate: "2030-05-15" }));
+        await good(web(a, "/api/profile", "PUT", { displayName: "Account A", lifecycleStage, admissionBasis: "FIXED_DATE", programEndDate: "2027-05-30", i94ExpirationDate: "2027-06-30", greenCardSince: "2020-01-01", greenCardExpirationDate: "2030-01-01", priorityDate: "2019-01-01", eadEndDate: "2027-02-28", passportExpirationDate: "2028-02-29", visaExpirationDate: "2030-05-15" }));
         const plan = (await good(web(a, "/api/plan"))).plan;
-        const actions = (await call(read.token, "get_action_plan")).actions;
-        assert.equal(actions.length, plan.items.filter((item) => !item.completed).length);
+        const mcpPlan = await call(read.token, "get_action_plan");
+        const actions = mcpPlan.actions;
+        assert.equal(actions.length, plan.items.length);
+        assert.deepEqual(mcpPlan.missingFields, []);
         for (const action of actions) {
           const webItem = plan.items.find((item) => item.id === action.id);
-          assert.deepEqual(Object.keys(action).sort(), ["dueDate", "id", "source", "status", "title"]);
-          assert.equal(action.title, webItem.title); assert.equal(action.dueDate, webItem.dueDate); assert.deepEqual(action.source, webItem.source);
+          assert.deepEqual(Object.keys(action).sort(), ["basis", "description", "dueDate", "id", "severity", "source", "status", "title"]);
+          assert.equal(action.title, webItem.title);
+          assert.equal(action.description, webItem.description);
+          assert.equal(action.dueDate, webItem.dueDate);
+          assert.equal(action.severity, webItem.severity);
+          assert.deepEqual(action.basis, webItem.basis);
+          assert.equal(action.status, webItem.completed ? "completed" : "open");
+          assert.deepEqual(action.source, webItem.source);
+          if (action.id.startsWith("universal-passport-expiry:")) {
+            assert.equal(action.source.url, "https://travel.state.gov/content/travel/en/us-visas/tourism-visit/visitor.html");
+          }
           assert.match(new URL(action.source.url).hostname, /^(www\.uscis\.gov|travel\.state\.gov)$/);
-          assert.doesNotMatch(JSON.stringify(action), /you (are eligible|qualify|should file)|earliest filing date|legal advice is/i);
+          assert.doesNotMatch(JSON.stringify(action), /you (are eligible|qualify|should file)|your earliest filing date is|legal advice is/i);
         }
       }
-      // Also verify MCP profile tools flow with VISITOR secondary profile isolation and I-94 reopening
+      // Also verify MCP profile tools flow with VISITOR secondary profile isolation, calendar export, and teaching errors
       const created = (await good(web(a, "/api/profile", "POST", { displayName: "Visitor MCP", lifecycleStage: "VISITOR", i94ExpirationDate: "2027-09-01", passportExpirationDate: "2029-12-31", visaExpirationDate: "2031-01-01" }))).profile;
       const listed = await call(read.token, "list_profiles");
       assert.ok(listed.profiles.some((p) => p.id === created.id && p.lifecycleStage === "VISITOR"));
       const fetched = await call(read.token, "get_profile", { profile: "Visitor MCP" });
+      assert.equal(fetched.profile.id, created.id);
+      assert.equal(fetched.profile.isPrimary, false);
       assert.equal(fetched.profile.lifecycleStage, "VISITOR");
       assert.equal(fetched.profile.i94ExpirationDate, "2027-09-01");
       assert.equal(fetched.profile.visaExpirationDate, "2031-01-01");
+
+      const notFound = await good(rpc(read.token, "tools/call", { name: "get_profile", arguments: { profile: "Unknown Relative" } }));
+      assert.equal(notFound.result.isError, true);
+      assert.match(notFound.result.content[0].text, /Account A/);
+      assert.match(notFound.result.content[0].text, /Visitor MCP/);
+      assert.match(notFound.result.content[0].text, /list_profiles/);
+
+      const calBefore = await call(read.token, "get_calendar_export", { profile: "Visitor MCP" });
+      assert.match(calBefore.ics, /^BEGIN:VCALENDAR\r\n/);
+      assert.equal((calBefore.ics.match(/BEGIN:VEVENT/g) ?? []).length, 2);
+      assert.match(calBefore.ics.replace(/\r\n /g, ""), /DTSTART;VALUE=DATE:20270901/);
+
       const visitorActions = (await call(read.token, "get_action_plan", { profile: "Visitor MCP" })).actions;
       assert.equal(visitorActions.length, 2);
       const extKey = visitorActions.find((item) => item.id.startsWith("visitor-i94-end:")).id;
-      await good(web(a, "/api/actions", "POST", { profileId: created.id, actionKey: extKey, completed: true }));
-      assert.equal((await call(read.token, "get_action_plan", { profile: created.id })).actions.length, 1);
+      await call(write.token, "set_action_completed", { profile: "Visitor MCP", actionId: extKey, completed: true });
+      const afterVisitorComplete = (await call(read.token, "get_action_plan", { profile: created.id })).actions;
+      assert.equal(afterVisitorComplete.length, 2);
+      assert.equal(afterVisitorComplete.find((item) => item.id === extKey).status, "completed");
+      assert.equal(afterVisitorComplete.find((item) => item.id.startsWith("universal-passport-expiry:")).status, "open");
+
+      const calAfter = await call(read.token, "get_calendar_export", { profile: created.id });
+      assert.equal((calAfter.ics.match(/BEGIN:VEVENT/g) ?? []).length, 1);
+
       const updated = await call(write.token, "update_profile_dates", { profile: "Visitor MCP", i94ExpirationDate: "2028-03-01" });
       assert.equal(updated.profile.i94ExpirationDate, "2028-03-01");
       assert.equal(updated.actions.length, 2);
-      assert.equal(updated.actions.find((item) => item.id.startsWith("visitor-i94-end:")).dueDate, "2028-03-01");
+      const reopenedVisitor = updated.actions.find((item) => item.id.startsWith("visitor-i94-end:"));
+      assert.equal(reopenedVisitor.dueDate, "2028-03-01");
+      assert.equal(reopenedVisitor.status, "open");
     });
     await t.test("session/Access users manage their own tokens; MCP bypasses only the web bridge", async (t) => {
       const access = accessFixture(t);

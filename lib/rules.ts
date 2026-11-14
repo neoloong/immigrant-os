@@ -224,7 +224,7 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
       severity: "important",
       confidence: "needs-review",
       basis: [`Passport expiration: ${formatDate(profile.passportExpirationDate)}`],
-      source: profile.lifecycleStage === "F1" ? SOURCES.opt : profile.lifecycleStage === "VISITOR" ? SOURCES.passport : SOURCES.h1b,
+      source: SOURCES.passport,
     });
   }
 
