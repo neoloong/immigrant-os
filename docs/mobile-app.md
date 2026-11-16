@@ -33,6 +33,11 @@ Web/auth sources, production `wrangler.jsonc`, and `package-lock.json` are uncha
 
 `capacitor.config.ts` describes an iOS WKWebView / Android WebView shell loading
 `https://immigrant-os.neoloong.workers.dev`. `server.cleartext` is `false`.
+`server.allowNavigation` lists exactly the Cloudflare Access login hosts
+(`neoloong.cloudflareaccess.com`, `oauth-callbacks.cloudflareaccess.com`,
+`dash.cloudflare.com`). Without them Capacitor sends the Access 302 to the system
+browser and the WebView stays blank (see `fix/android-webview`). If the Access
+team domain or identity providers change, update this list.
 The app name is `Immigrant OS`; `com.neoloong.immigrantos` is a **placeholder
 pending the owner's confirmation**, before registering either store identifier.
 
