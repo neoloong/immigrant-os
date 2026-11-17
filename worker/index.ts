@@ -7,6 +7,7 @@ import { handleMcp } from "../lib/mcp";
 import { handleAgentTokens } from "../lib/agent-tokens";
 import { agentDiscovery, agentGuide } from "../lib/agent-onboarding";
 import type { AccessEnv } from "../lib/access-jwt";
+import { privacyPage, publicPageResponse } from "../lib/public-pages";
 
 interface Env extends AccessEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -45,7 +46,8 @@ const worker = {
     }).__IMMIGRANT_AUTH_CONFIG__ = { authMode: env.AUTH_MODE, sessionSecret: env.SESSION_SECRET };
     const url = new URL(request.url);
 
-    // Only these exact routes are public/independently authenticated. The web
+    // Only these exact routes (plus the anonymous `/` landing page served from
+    // handleAccessAuth) are public/independently authenticated. The web
     // Access bridge and all existing authenticated routes remain unchanged.
     const agentsEnabled = env.AGENT_MCP_ENABLED === "true";
     if (url.pathname === "/mcp") return handleMcp(request, agentsEnabled);
@@ -58,6 +60,7 @@ const worker = {
           "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" },
       });
     }
+    if (url.pathname === "/privacy") return publicPageResponse(request, privacyPage());
     const authResponse = await handleAccessAuth(request, env);
     if (authResponse) return authResponse;
     if (url.pathname === "/api/agent-tokens") {

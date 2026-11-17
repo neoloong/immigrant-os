@@ -1,5 +1,6 @@
 import { getAuthConfig, issueSession, ownerFromRequest, revokeSession, sessionCookieFromRequest } from "./auth";
 import { accessConfig, verifyAccessIdentityDetailed, type AccessEnv } from "./access-jwt";
+import { landingPage, publicPageResponse } from "./public-pages";
 
 const PRIVATE_HEADERS = { "cache-control": "private, no-store" };
 
@@ -40,6 +41,13 @@ export async function handleAccessAuth(request: Request, env: AccessEnv): Promis
   }
   const identity = await verifyAccessIdentityDetailed(request, config);
   if (identity.reason !== "ok") {
+    // A visitor with no valid Access identity has no app session (sessions are
+    // only honored alongside a matching Access identity). The root then shows
+    // the static public landing page, which contains no user data. Every other
+    // path, and every non-GET/HEAD root request, is still rejected below.
+    if (url.pathname === "/" && (request.method === "GET" || request.method === "HEAD")) {
+      return publicPageResponse(request, landingPage());
+    }
     // Server-side log carries only the fixed reason code; the response
     // body never exposes diagnostic details.
     console.error(identity.reason);
