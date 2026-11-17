@@ -4,6 +4,13 @@
 
 None. Agent MCP implementation and available local validation are complete; operator Miniflare, UI/connector smoke checks and activation remain below.
 
+## Public landing page (2026-11-16)
+
+- Branch `landing-page` (worktree `~/Projects/immigrant-os-landing`) from `mcp-dogfood-fixes` `5ccc4f9`. Claude Code was the sole writer; assignment cleared. Owner approved a public face; Access policy changes stay with the owner.
+- Session mode: GET/HEAD `/` without a valid Access identity now returns a static landing page (`lib/public-pages.ts`) instead of 401 JSON. Signed-in behavior (bootstrap redirect, app render, owner checks) is unchanged; every other path still returns 401 without a valid identity. Added public `/privacy`; `/agents` and `/llms.txt` were already public at the Worker. Dispatch (Sites) mode is unchanged.
+- The request-access mailto (`neoloong@gmail.com`) needs owner confirmation. The Access-side change and its open root-path question are in `~/landing.summary.md`.
+- `npm ci`, `npx tsc --noEmit`, eslint on changed files and `npm test` (55/55, Miniflare suites included) passed. Pushed branch only; no merge, deploy or Access change.
+
 ## Agent-native MCP layer (2026-11-09)
 
 - Local branch `agent-mcp` is based on the `independent-hosting` tip `83ac8c5` in `/Users/chao/Projects/immigrant-os/work/agent-mcp`. Creating a branch in the original checkout failed because its `.git` is read-only; the isolated local clone is writable. The original checkout is untouched. Codex was the sole writer; active assignment cleared. No other agent/provider or billing was used.
