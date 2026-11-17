@@ -70,7 +70,7 @@ test("Access validates JWTs before touching storage", async (t) => {
     await reject(`!.${payload}.${signature}`, "bad_header");
   });
   await t.test("rejection bodies never expose diagnostic details and logs contain only the code", async () => {
-    for (const path of ["/", "/api/profile", "/auth/access/", "/images/icon.png"]) {
+    for (const path of ["/api/profile", "/auth/access/", "/images/icon.png"]) {
       const response = await call(env, path);
       assert.equal(response.status, 401);
       assert.equal(response.headers.get("cache-control"), "private, no-store");
@@ -164,9 +164,18 @@ test("Access creates owner-scoped sessions, checks every request, and revokes on
       assert.equal((await (await call(env, "/api/profile", headers("b@example.test", b))).json()).profile, null);
     });
     await t.test("a surviving app cookie cannot bypass missing or expired Access JWTs", async () => {
-      for (const path of ["/", "/api/profile", "/api/documents"]) {
+      for (const path of ["/api/profile", "/api/documents"]) {
         assert.equal((await call(env, path, { cookie: a })).status, 401);
         assert.equal((await call(env, path, { cookie: a, "Cf-Access-Jwt-Assertion": access.jwt({ email: "a@example.test", exp: 0 }) })).status, 401);
+      }
+      // The root shows only the static public landing page, never the app or saved data.
+      for (const extra of [{}, { "Cf-Access-Jwt-Assertion": access.jwt({ email: "a@example.test", exp: 0 }) }]) {
+        const response = await call(env, "/", { cookie: a, ...extra });
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get("set-cookie"), null);
+        const html = await response.text();
+        assert.match(html, /Request access/);
+        assert.doesNotMatch(html, /a@example\.test|_vinext|<script/i);
       }
     });
     await t.test("a different Access owner cannot use the old cookie", async () => {
