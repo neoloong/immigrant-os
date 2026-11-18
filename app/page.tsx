@@ -3,10 +3,10 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { ImmigrationProfile, LifecycleStage } from "../lib/profile";
 import type { PlanItem, PlanResult, Source } from "../lib/rules";
-import AgentSettings from "./agent-settings";
+import SettingsView from "./agent-settings";
 import { calendarFile } from "../lib/calendar";
 
-type View = "plan" | "documents" | "cases" | "assistant" | "settings";
+type View = "plan" | "profiles" | "documents" | "cases" | "assistant" | "settings";
 type SavedDocument = { id: string; kind: string; filename: string; mimeType: string; sizeBytes: number; uploadedAt: string };
 type TrackedCase = { id: string; receiptNumber: string; formType: string; nickname: string; statusText: string; lastCheckedAt: string | null; createdAt: string };
 type ChatMessage = { role: "user" | "assistant"; text: string; sources?: Source[]; limitations?: string };
@@ -38,11 +38,20 @@ const STAGES: { id: LifecycleStage; label: string; short: string; coverage: stri
 
 const NAV: { id: View; label: string; icon: string }[] = [
   { id: "plan", label: "Action plan", icon: "plan" },
+  { id: "profiles", label: "Profiles", icon: "users" },
   { id: "documents", label: "Documents", icon: "file" },
   { id: "cases", label: "Cases", icon: "case" },
-  { id: "assistant", label: "Assistant", icon: "spark" },
+  { id: "assistant", label: "Connect assistant", icon: "spark" },
   { id: "settings", label: "Settings", icon: "shield" },
 ];
+
+const STAGE_LABELS: Record<string, string> = {
+  STUDENT: "Student", OPT: "Post-completion OPT", STEM_OPT: "STEM OPT",
+  H1B: "H-1B", H4: "H-4", B1_B2: "Visitor (B1/B2)",
+  PERM: "PERM (labor certification)", I140: "I-140 petition", I485: "I-485 (adjustment of status)", CONSULAR: "Consular processing",
+};
+function statusLabel(code: string) { return STAGE_LABELS[code] ?? code; }
+function stageLabel(stage: LifecycleStage) { return STAGES.find((item) => item.id === stage)?.label ?? stage; }
 
 export default function Home() {
   const [view, setView] = useState<View>("plan");
@@ -58,7 +67,7 @@ export default function Home() {
   const [toast, setToast] = useState("");
   const [fatalError, setFatalError] = useState("");
 
-  const refresh = async (requestedProfileId?: string | null) => {
+  const refresh = async (requestedProfileId?: string | null): Promise<string | null> => {
     setFatalError("");
     const targetId = requestedProfileId !== undefined ? requestedProfileId : activeProfileId;
     const query = targetId ? `?profileId=${encodeURIComponent(targetId)}` : "";
@@ -75,6 +84,7 @@ export default function Home() {
       setPlan(planData.plan);
       setDocuments(documentData.documents);
       setCases(caseData.cases);
+      return profileData.profile?.id ?? null;
     } catch (error) {
       if (targetId) {
         try {
@@ -90,13 +100,14 @@ export default function Home() {
           setPlan(planData.plan);
           setDocuments(documentData.documents);
           setCases(caseData.cases);
-          return;
+          return profileData.profile?.id ?? null;
         } catch (fallbackError) {
           setFatalError(fallbackError instanceof Error ? fallbackError.message : "Unable to load your workspace.");
-          return;
+          return null;
         }
       }
       setFatalError(error instanceof Error ? error.message : "Unable to load your workspace.");
+      return null;
     } finally {
       setLoading(false);
     }
@@ -116,10 +127,12 @@ export default function Home() {
   const selectProfile = async (nextProfileId: string) => {
     if (!nextProfileId || nextProfileId === profile?.id) return;
     setActiveProfileId(nextProfileId);
-    await refresh(nextProfileId);
+    const loadedId = await refresh(nextProfileId);
     const chosen = profiles.find((item) => item.id === nextProfileId);
-    if (chosen) {
-      notify(`Switched to ${chosen.displayName || "primary profile"}.`);
+    if (loadedId === nextProfileId) {
+      notify(`Switched to ${chosen?.displayName || "primary profile"}.`);
+    } else if (loadedId) {
+      notify("Could not open that profile, so your primary profile is shown instead.");
     }
   };
 
@@ -177,12 +190,14 @@ export default function Home() {
 
   const stage = STAGES.find((item) => item.id === profile.lifecycleStage) ?? STAGES[0];
   const profileList = profiles.length ? profiles : [profile];
+  const activeLabel = profileLabel(profile, profileList.indexOf(profile));
+  const viewingLabel = profileList.length > 1 ? activeLabel : undefined;
 
   return (
     <main className="app-shell">
       <aside className="sidebar">
         <Brand />
-        <div className="journey-chip"><span className="journey-dot" /><div><small>YOUR JOURNEY</small><strong>{stage.label}</strong><em>{plan?.coverage ?? stage.coverage}</em></div></div>
+        <div className="journey-chip"><span className="journey-dot" /><div><small>VIEWING</small><strong>{profileLabel(profile, profileList.indexOf(profile))}</strong><em>{stage.label}</em></div></div>
         <nav className="side-nav" aria-label="Main navigation">
           {NAV.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon name={item.icon} /><span>{item.label}</span></button>)}
         </nav>
@@ -216,20 +231,14 @@ export default function Home() {
                 <option value="__add__">+ Add profile…</option>
               </select>
             </label>
-            <button type="button" className="secondary switcher-add" onClick={() => setAddingProfile(true)}>
-              <Icon name="plus" size={14} /> <span>Add profile</span>
-            </button>
           </div>
-          <div className="topbar-copy"><span className="coverage-dot" /><span>{plan?.coverage ?? stage.coverage} module</span><b>Dates from your profile · Review official guidance</b></div>
+          <div className="topbar-copy"><span className="coverage-dot" /><b>Dates from your profile · Review official guidance</b></div>
           <button className="avatar top-avatar" onClick={() => setProfileOpen(true)} aria-label="Edit profile">{initials(profile.displayName)}</button>
         </header>
 
-        {view === "plan" && <PlanView key={profile.id ?? "primary"} profile={profile} plan={plan} documents={documents} cases={cases} onEdit={() => setProfileOpen(true)} onNavigate={setView} onRefresh={async () => { await refresh(); }} notify={notify} />}
-        {view === "documents" && <DocumentsView key={profile.id ?? "primary"} profileId={profile.id} documents={documents} onChanged={async () => { await refresh(); }} notify={notify} />}
-        {view === "cases" && <CasesView key={profile.id ?? "primary"} profileId={profile.id} cases={cases} onChanged={async () => { await refresh(); }} notify={notify} />}
-        {view === "assistant" && <AssistantView key={profile.id ?? "primary"} profileId={profile.id} plan={plan} />}
-        {view === "settings" && (
-          <AgentSettings
+        {view === "plan" && <PlanView key={profile.id ?? "primary"} profile={profile} plan={plan} documents={documents} cases={cases} viewingLabel={viewingLabel} onEdit={() => setProfileOpen(true)} onNavigate={setView} onRefresh={async () => { await refresh(); }} notify={notify} />}
+        {view === "profiles" && (
+          <ProfilesView
             profiles={profileList}
             activeProfileId={profile.id}
             onSelectProfile={(id) => void selectProfile(id)}
@@ -238,6 +247,10 @@ export default function Home() {
             onDeleteProfile={handleDeleteProfile}
           />
         )}
+        {view === "documents" && <DocumentsView key={profile.id ?? "primary"} profileId={profile.id} viewingLabel={viewingLabel} documents={documents} onChanged={async () => { await refresh(); }} notify={notify} />}
+        {view === "cases" && <CasesView key={profile.id ?? "primary"} profileId={profile.id} viewingLabel={viewingLabel} cases={cases} onChanged={async () => { await refresh(); }} notify={notify} />}
+        {view === "assistant" && <AssistantView key={profile.id ?? "primary"} profileId={profile.id} viewingLabel={viewingLabel} plan={plan} />}
+        {view === "settings" && <SettingsView />}
       </section>
 
       <nav className="bottom-nav" aria-label="Mobile navigation">{NAV.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon name={item.icon} /><span>{item.label}</span></button>)}</nav>
