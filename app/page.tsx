@@ -276,7 +276,7 @@ export default function Home() {
   );
 }
 
-function PlanView({ profile, plan, documents, cases, onEdit, onNavigate, onRefresh, notify }: { profile: ImmigrationProfile; plan: PlanResult | null; documents: SavedDocument[]; cases: TrackedCase[]; onEdit: () => void; onNavigate: (view: View) => void; onRefresh: () => Promise<void>; notify: (message: string) => void }) {
+function PlanView({ profile, plan, documents, cases, viewingLabel, onEdit, onNavigate, onRefresh, notify }: { profile: ImmigrationProfile; plan: PlanResult | null; documents: SavedDocument[]; cases: TrackedCase[]; viewingLabel?: string; onEdit: () => void; onNavigate: (view: View) => void; onRefresh: () => Promise<void>; notify: (message: string) => void }) {
   const [busy, setBusy] = useState("");
   const openItems = plan?.items.filter((item) => !item.completed) ?? [];
   const next = openItems[0];
@@ -306,7 +306,7 @@ function PlanView({ profile, plan, documents, cases, onEdit, onNavigate, onRefre
   };
 
   return <div className="page plan-page">
-    <section className="page-intro"><div><p className="eyebrow">{new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</p><h1>{greeting()}, {firstName(profile.displayName)}.</h1><p>{plan?.summary}</p></div><div className="intro-actions"><button className="secondary" onClick={onEdit}><Icon name="edit" /> Update profile</button><button className="secondary" onClick={exportCalendar} disabled={!openItems.some((item) => item.dueDate)}><Icon name="download" /> Export calendar</button><button className="icon-action" onClick={() => window.print()} aria-label="Print action plan"><Icon name="print" /></button></div></section>
+    <section className="page-intro"><div><p className="eyebrow">{new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</p><h1>{viewingLabel ? `Viewing ${viewingLabel}’s plan` : `${greeting()}, ${firstName(profile.displayName)}.`}</h1><p>{plan?.summary}</p></div><div className="intro-actions"><button className="secondary" onClick={onEdit}><Icon name="edit" /> Update profile</button><button className="secondary" onClick={exportCalendar} disabled={!openItems.some((item) => item.dueDate)}><Icon name="download" /> Export calendar</button><button className="icon-action" onClick={() => window.print()} aria-label="Print action plan"><Icon name="print" /></button></div></section>
 
     {plan?.missingFields.length ? <section className="missing-card"><div className="missing-icon"><Icon name="alert" /></div><div><span className="overline">COMPLETE YOUR TIMELINE</span><h2>{plan.missingFields.length} profile item{plan.missingFields.length === 1 ? "" : "s"} missing</h2><ul>{plan.missingFields.map((field) => <li key={field}>{field}</li>)}</ul><button onClick={onEdit}>Add missing details <Icon name="arrow" /></button></div></section> : null}
 
@@ -320,7 +320,64 @@ function PlanView({ profile, plan, documents, cases, onEdit, onNavigate, onRefre
   </div>;
 }
 
-function DocumentsView({ profileId, documents, onChanged, notify }: { profileId?: string; documents: SavedDocument[]; onChanged: () => Promise<void>; notify: (message: string) => void }) {
+function ProfilesView({ profiles, activeProfileId, onSelectProfile, onAddProfile, onRenameProfile, onDeleteProfile }: {
+  profiles: ImmigrationProfile[];
+  activeProfileId?: string;
+  onSelectProfile: (id: string) => void;
+  onAddProfile: () => void;
+  onRenameProfile: (id: string, displayName: string) => Promise<void>;
+  onDeleteProfile: (profile: ImmigrationProfile) => Promise<void>;
+}) {
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submitRename = async (event: FormEvent, id: string) => {
+    event.preventDefault();
+    if (!renameDraft.trim()) return;
+    setBusy(true);
+    try {
+      await onRenameProfile(id, renameDraft.trim());
+      setRenamingId(null);
+      setRenameDraft("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <div className="page">
+    <section className="page-intro"><div><p className="eyebrow">PROFILES</p><h1>Who are we tracking?</h1><p>Switch between family members, rename a profile, or add someone new. Each profile keeps its own dates, documents, and cases.</p></div><div className="intro-actions"><button type="button" className="primary" onClick={onAddProfile}><Icon name="plus" /> Add profile</button></div></section>
+
+    <div className="section-block profile-management">
+      <div className="agent-token-list">
+        {profiles.map((item, idx) => {
+          const itemId = item.id ?? "";
+          const isActive = activeProfileId === itemId;
+          const isRenaming = renamingId === itemId;
+          const canDelete = !item.isPrimary && profiles.length > 1;
+          return <article key={itemId || `${item.displayName}-${idx}`}>
+            <div>
+              <h3>{profileLabel(item, idx)} {item.isPrimary ? <span className="tag info">You</span> : null} {isActive ? <span className="tag planning">Viewing now</span> : null}</h3>
+              <p>{stageLabel(item.lifecycleStage)}{item.statusSubtype ? ` · ${statusLabel(item.statusSubtype)}` : ""}</p>
+              {isRenaming && <form className="inline-rename-form" onSubmit={(event) => void submitRename(event, itemId)}>
+                <input value={renameDraft} maxLength={100} onChange={(event) => setRenameDraft(event.target.value)} placeholder="Name (e.g. spouse, child)" required aria-label="New profile name" />
+                <button type="submit" className="primary" disabled={busy || !renameDraft.trim()}>Save</button>
+                <button type="button" className="secondary" onClick={() => { setRenamingId(null); setRenameDraft(""); }}>Cancel</button>
+              </form>}
+            </div>
+            <div className="agent-buttons">
+              {!isActive && itemId && <button type="button" className="secondary" onClick={() => onSelectProfile(itemId)}>View this profile</button>}
+              {itemId && !isRenaming && <button type="button" className="secondary" onClick={() => { setRenamingId(itemId); setRenameDraft(item.displayName || ""); }}>Rename</button>}
+              {itemId && canDelete && <button type="button" className="secondary danger-text" disabled={busy} onClick={() => void onDeleteProfile(item)}>Delete</button>}
+            </div>
+          </article>;
+        })}
+      </div>
+    </div>
+  </div>;
+}
+
+function DocumentsView({ profileId, viewingLabel, documents, onChanged, notify }: { profileId?: string; viewingLabel?: string; documents: SavedDocument[]; onChanged: () => Promise<void>; notify: (message: string) => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [kind, setKind] = useState("Passport");
   const [uploading, setUploading] = useState(false);
@@ -337,7 +394,7 @@ function DocumentsView({ profileId, documents, onChanged, notify }: { profileId?
       await api("/api/documents", { method: "POST", body: form });
       if (fileRef.current) fileRef.current.value = "";
       await onChanged();
-      notify(`${file.name} saved.`);
+      notify(viewingLabel ? `${file.name} saved for ${viewingLabel}.` : `${file.name} saved.`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Upload failed.");
     } finally {
@@ -356,7 +413,7 @@ function DocumentsView({ profileId, documents, onChanged, notify }: { profileId?
     }
   };
 
-  return <div className="page"><section className="page-intro"><div><p className="eyebrow">PRIVATE DOCUMENT VAULT</p><h1>Your documents</h1><p>Actual files are stored with your signed-in workspace—not simulated.</p></div></section><section className="upload-panel"><div className="upload-mark"><Icon name="upload" /></div><div><h2>Add a document</h2><p>Save a PDF, JPEG, or PNG. OCR and field extraction are not enabled in this build, so use Profile to enter confirmed dates.</p></div><label><span>Document type</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option>Passport</option><option>Visa</option><option>Form I-20</option><option>I-94</option><option>EAD</option><option>USCIS notice</option><option>Green Card</option><option>Other</option></select></label><input ref={fileRef} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => void upload(event.target.files?.[0])} /><button className="primary" disabled={uploading} onClick={() => fileRef.current?.click()}><Icon name="upload" /> {uploading ? "Uploading…" : "Choose file"}</button></section>
+  return <div className="page"><section className="page-intro"><div><p className="eyebrow">PRIVATE DOCUMENT VAULT</p><h1>{viewingLabel ? `Documents for ${viewingLabel}` : "Your documents"}</h1><p>Your files are stored privately with your signed-in account.</p></div></section><section className="upload-panel"><div className="upload-mark"><Icon name="upload" /></div><div><h2>Add a document</h2><p>Save a PDF, JPEG, or PNG. OCR and field extraction are not enabled in this build, so use Profile to enter confirmed dates.</p></div><label><span>Document type</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option>Passport</option><option>Visa</option><option>Form I-20</option><option>I-94</option><option>EAD</option><option>USCIS notice</option><option>Green Card</option><option>Other</option></select></label><input ref={fileRef} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => void upload(event.target.files?.[0])} /><button className="primary" disabled={uploading} onClick={() => fileRef.current?.click()}><Icon name="upload" /> {uploading ? "Uploading…" : "Choose file"}</button></section>
 
     <div className="section-heading document-heading"><div><p className="eyebrow">SAVED FILES</p><h2>{documents.length} document{documents.length === 1 ? "" : "s"}</h2></div><span>Maximum 10 MB each</span></div>
     {documents.length ? <div className="document-list">{documents.map((document) => <article className="document-row" key={document.id}><span className="document-icon"><Icon name="file" /></span><div><span className="tag info">{document.kind}</span><h3>{document.filename}</h3><p>{formatBytes(document.sizeBytes)} · Uploaded {formatDateTime(document.uploadedAt)}</p></div><a className="icon-action" href={`/api/documents?download=${encodeURIComponent(document.id)}${profileParam}`} aria-label={`Download ${document.filename}`}><Icon name="download" /></a><button className="icon-action danger" onClick={() => void remove(document)} aria-label={`Delete ${document.filename}`}><Icon name="trash" /></button></article>)}</div> : <EmptyState icon="file" title="No saved documents" copy="Upload one document to test the real vault flow." />}
@@ -364,7 +421,7 @@ function DocumentsView({ profileId, documents, onChanged, notify }: { profileId?
   </div>;
 }
 
-function CasesView({ profileId, cases, onChanged, notify }: { profileId?: string; cases: TrackedCase[]; onChanged: () => Promise<void>; notify: (message: string) => void }) {
+function CasesView({ profileId, viewingLabel, cases, onChanged, notify }: { profileId?: string; viewingLabel?: string; cases: TrackedCase[]; onChanged: () => Promise<void>; notify: (message: string) => void }) {
   const [receiptNumber, setReceiptNumber] = useState("");
   const [formType, setFormType] = useState("");
   const [nickname, setNickname] = useState("");
@@ -389,7 +446,7 @@ function CasesView({ profileId, cases, onChanged, notify }: { profileId?: string
     catch (error) { notify(error instanceof Error ? error.message : "Unable to remove case."); }
   };
 
-  return <div className="page"><section className="page-intro"><div><p className="eyebrow">CASE WORKSPACE</p><h1>USCIS receipts</h1><p>Keep each filing separate and open the official status tool with the correct receipt number.</p></div></section><form className="case-form" onSubmit={submit}><div><label>Receipt number</label><input value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value.toUpperCase())} placeholder="IOE1234567890" maxLength={15} required /><small>3 letters + 10 digits</small></div><div><label>Form</label><input value={formType} onChange={(event) => setFormType(event.target.value)} placeholder="I-765" /></div><div><label>Label</label><input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="My OPT EAD" /></div><button className="primary" disabled={saving}><Icon name="plus" /> {saving ? "Saving…" : "Add case"}</button></form>
+  return <div className="page"><section className="page-intro"><div><p className="eyebrow">CASE WORKSPACE</p><h1>{viewingLabel ? `${viewingLabel}’s USCIS receipts` : "USCIS receipts"}</h1><p>Keep each filing separate and open the official status tool with the correct receipt number.</p></div></section><form className="case-form" onSubmit={submit}><div><label>Receipt number</label><input value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value.toUpperCase())} placeholder="IOE1234567890" maxLength={15} required /><small>3 letters + 10 digits</small></div><div><label>Form</label><input value={formType} onChange={(event) => setFormType(event.target.value)} placeholder="I-765" /></div><div><label>Label</label><input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="My OPT EAD" /></div><button className="primary" disabled={saving}><Icon name="plus" /> {saving ? "Saving…" : "Add case"}</button></form>
 
     <div className="case-list">{cases.map((item) => <article className="case-card" key={item.id}><div className="case-form-badge">{item.formType || "CASE"}</div><div><span>{item.nickname || "USCIS filing"}</span><h2>{item.receiptNumber}</h2><p>Saved {formatDateTime(item.createdAt)} · Check updates on the official USCIS website</p></div><a className="secondary" href={`https://egov.uscis.gov/casestatus/mycasestatus.do?appReceiptNum=${encodeURIComponent(item.receiptNumber)}`} target="_blank" rel="noreferrer">Open official status <Icon name="external" /></a><button className="icon-action danger" onClick={() => void remove(item.id)} aria-label="Remove case"><Icon name="trash" /></button></article>)}</div>
     {!cases.length && <EmptyState icon="case" title="No receipts yet" copy="Add an actual USCIS receipt number above. It will persist across sessions." />}
@@ -397,7 +454,7 @@ function CasesView({ profileId, cases, onChanged, notify }: { profileId?: string
   </div>;
 }
 
-function AssistantView({ profileId, plan }: { profileId?: string; plan: PlanResult | null }) {
+function AssistantView({ profileId, viewingLabel, plan }: { profileId?: string; viewingLabel?: string; plan: PlanResult | null }) {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [asking, setAsking] = useState(false);
@@ -416,7 +473,7 @@ function AssistantView({ profileId, plan }: { profileId?: string; plan: PlanResu
     } finally { setAsking(false); }
   };
 
-  return <div className="page assistant-page"><section className="assistant-intro"><span className="assistant-mark"><Icon name="spark" /></span><p className="eyebrow">PROFILE-GROUNDED ASSISTANT</p><h1>Ask about your action plan.</h1><p>Answers use your saved dates and checklist. This is a simple guide, not an AI chat or a legal eligibility assessment.</p><div className="assistant-status"><span className="coverage-dot" /><b>{plan?.stageLabel}</b><em>{plan?.coverage} module</em></div></section><section className="chat-card"><div className="chat-log" aria-live="polite">{!messages.length ? <div className="suggestion-grid">{suggestions.map((suggestion) => <button onClick={() => void ask(suggestion)} key={suggestion}>{suggestion}<Icon name="arrow" /></button>)}</div> : messages.map((message, index) => <div className={`message ${message.role}`} key={`${message.role}-${index}`}><span>{message.role === "assistant" ? <Icon name="spark" /> : "You"}</span><div><p>{message.text}</p>{message.sources?.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label} <Icon name="external" /></a>)}{message.limitations && <small>{message.limitations}</small>}</div></div>)}</div><form className="composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}><input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about your status, dates, or missing information…" aria-label="Ask ImmigrantOS" /><button disabled={asking || !question.trim()} aria-label="Send question">{asking ? <span className="spinner" /> : <Icon name="send" />}</button></form></section></div>;
+  return <div className="page assistant-page"><section className="assistant-intro"><span className="assistant-mark"><Icon name="spark" /></span><p className="eyebrow">PROFILE-GROUNDED ASSISTANT</p><h1>{viewingLabel ? `Ask about ${viewingLabel}’s action plan.` : "Ask about your action plan."}</h1><p>Answers use your saved dates and checklist. This is a simple guide, not an AI chat or a legal eligibility assessment.</p><div className="assistant-status"><span className="coverage-dot" /><b>{plan?.stageLabel}</b><em>{plan?.coverage} module</em></div></section><section className="chat-card"><div className="chat-log" aria-live="polite">{!messages.length ? <div className="suggestion-grid">{suggestions.map((suggestion) => <button onClick={() => void ask(suggestion)} key={suggestion}>{suggestion}<Icon name="arrow" /></button>)}</div> : messages.map((message, index) => <div className={`message ${message.role}`} key={`${message.role}-${index}`}><span>{message.role === "assistant" ? <Icon name="spark" /> : "You"}</span><div><p>{message.text}</p>{message.sources?.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label} <Icon name="external" /></a>)}{message.limitations && <small>{message.limitations}</small>}</div></div>)}</div><form className="composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}><input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about your status, dates, or missing information…" aria-label="Ask ImmigrantOS" /><button disabled={asking || !question.trim()} aria-label="Send question">{asking ? <span className="spinner" /> : <Icon name="send" />}</button></form></section></div>;
 }
 
 function Onboarding({ mode = "initial", onCancel, onSaved }: { mode?: "initial" | "add"; onCancel?: () => void; onSaved: (createdProfileId?: string) => void }) {
