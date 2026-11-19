@@ -8,7 +8,8 @@ async function tokensApi(init?: RequestInit, query = "") {
   if (!response.ok) throw new Error(data.error ?? "Unable to manage tokens.");
   return data;
 }
-const dateTime = (date: string) => new Date(date).toLocaleString();
+// Dates only (no seconds) so the token list stays readable.
+const dateTime = (date: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(date));
 
 // "Connect your own AI assistant" section, shown on the Connect assistant page.
 // Tokens are account-wide (not per profile).
@@ -49,11 +50,12 @@ export default function AgentConnect() {
   }
   return <section className="section-block agent-settings" aria-labelledby="connect-agent-title">
     <div className="section-heading"><div><p className="eyebrow">Your own AI assistant</p><h2 id="connect-agent-title">Connect your own AI assistant</h2></div></div>
-    <p><a href="/agents">Use with your AI agent: connection guide and starter prompt →</a></p>
-    <p>A connected assistant can see every profile in this account. Start with Read only. Read + write also allows date/status corrections and adding receipts. Tokens expire after 90 days. Revoke access here whenever you need to.</p>
+    <p>This lets an AI assistant you already use (for example Claude) read your saved dates and checklist, so you can ask it questions about them. It needs an assistant that lets you add a custom connector with a request header; the guide lists the steps.</p>
+    <p><a href="/agents" target="_blank" rel="noreferrer">Open the connection guide and starter prompt (new tab) →</a></p>
+    <p>A connected assistant can see every profile in this account. Tokens expire after 90 days. Revoke access here whenever you need to.</p>
     {message && <p role="status" className="agent-notice">{message}</p>}
     {secret && <section className="agent-secret" aria-label="New token">
-      <h2>Copy your token now</h2><p>This is the only time it is shown. Keep it in your agent’s private credential settings; never paste it into chat.</p>
+      <h2>Copy your token now</h2><p>This is the only time it is shown. Copy it before leaving this page. Keep it in your agent’s private credential settings; never paste it into chat.</p>
       <code>{secret.value}</code><div className="agent-buttons">
         <button className="primary" onClick={async () => { try { await navigator.clipboard.writeText(secret.value); setMessage("Token copied."); } catch { setMessage("Copy was unavailable. Select the token and copy it manually."); } }}>Copy token</button>
         <button className="secondary" onClick={() => setSecret(null)}>I saved it — dismiss</button>
@@ -63,11 +65,12 @@ export default function AgentConnect() {
       <label>Permission<select value={scopes} onChange={(event) => setScopes(event.target.value)}><option value="read">Read only</option><option value="write">Read + write</option></select></label>
       <button className="primary" disabled={!ready || busy || !!secret || !label.trim()}>Create token</button>
     </form>
+    <p className="agent-form-hint"><strong>Read only</strong> (recommended): the assistant can read dates, tasks, document names and receipts. <strong>Read + write</strong>: it can also correct dates or status, mark tasks done, and add receipts.</p>
     <h3>Your tokens</h3>
     {ready && !tokens.length && <p>No assistants connected yet. Create a token above, copy it, then follow the connection guide.</p>}
     <div className="agent-token-list">{tokens.map((token) => <article key={token.id}>
       <div><h3>{token.label}</h3><p>{token.scopes === "write" ? "Read + write" : "Read only"} · {token.revokedAt ? "Revoked" : new Date(token.expiresAt).getTime() <= now ? "Expired" : "Active"}</p>
-      <p>Last used: {token.lastUsedAt ? dateTime(token.lastUsedAt) : "Never"}<br />Created: {dateTime(token.createdAt)}<br />Expires: {dateTime(token.expiresAt)}</p></div>
+      <p>Last used: {token.lastUsedAt ? dateTime(token.lastUsedAt) : "Never"}<br />Created: {dateTime(token.createdAt)}<br />Expires: {dateTime(token.expiresAt)}</p>{!token.revokedAt && new Date(token.expiresAt).getTime() <= now && <p>Expired. Create a new token above to replace it.</p>}</div>
       {!token.revokedAt && <button className="secondary" disabled={busy} onClick={() => void revoke(token.id)}>Revoke<span className="visually-hidden"> {token.label}</span></button>}
     </article>)}</div>
   </section>;

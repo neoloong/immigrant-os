@@ -100,6 +100,7 @@ export default function Home() {
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [fatalError, setFatalError] = useState("");
+  const [fatalSignIn, setFatalSignIn] = useState(false);
   const toastTimer = useRef<number | undefined>(undefined);
 
   const notify: Notify = (message, tone = "success") => {
@@ -123,7 +124,7 @@ export default function Home() {
   // only a profile that no longer exists (404) falls back to the primary profile, with
   // an explicit notice naming who is now shown.
   const refresh = async (requestedProfileId?: string | null): Promise<string | null> => {
-    setFatalError("");
+    setFatalError(""); setFatalSignIn(false);
     const targetId = requestedProfileId !== undefined ? requestedProfileId : activeProfileId;
     try {
       return applyWorkspace(await loadWorkspace(targetId));
@@ -144,6 +145,7 @@ export default function Home() {
         notify(`Couldn’t refresh ${profileLabel(profile, profiles.indexOf(profile))}’s information. What you see may be out of date. ${message}`, "error");
         return profile.id ?? null;
       }
+      setFatalSignIn(error instanceof ApiError && (error.status === 401 || error.status === 403));
       setFatalError(message);
       return null;
     } finally {
@@ -216,7 +218,7 @@ export default function Home() {
   const toastNode = toast && <div className={`toast ${toast.tone}`} role={toast.tone === "error" ? "alert" : "status"}><span><Icon name={toast.tone === "error" ? "alert" : "check"} /></span>{toast.message}</div>;
 
   if (loading) return <LoadingScreen />;
-  if (fatalError) return <ErrorScreen message={fatalError} onRetry={() => { setLoading(true); void refresh(); }} />;
+  if (fatalError) return <ErrorScreen message={fatalError} signIn={fatalSignIn} onRetry={() => { setLoading(true); void refresh(); }} />;
   if (!profile) return <Onboarding onSaved={(createdId) => { setLoading(true); void refresh(createdId ?? null); }} />;
   if (addingProfile) {
     return (
@@ -429,7 +431,7 @@ function PlanView({ profile, person, plan, documents, cases, onEdit, onNavigate,
     : missing.length ? `The plan is built from the dates you save. ${missing.length} date${s(missing.length)} still missing.` : items.length ? "Everything in this plan is marked complete." : "Add more dates to get reminders.";
 
   return <div className="page plan-page">
-    <section className="page-intro"><div><p className="eyebrow">{new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date())}</p><h1>{person.isSelf ? `${greeting()}, ${firstName(profile.displayName)}.` : `Viewing ${person.possessive} plan`}</h1><p>{subtitle}</p></div><div className="intro-actions"><button className="secondary" onClick={onEdit}><Icon name="edit" /> Edit details</button><button className="secondary" onClick={exportCalendar} disabled={!canExport} title={canExport ? undefined : "No dated actions to export yet"}><Icon name="download" /> Export calendar</button><button className="icon-action" onClick={() => window.print()} aria-label="Print action plan"><Icon name="print" /></button></div></section>
+    <section className="page-intro"><div><p className="eyebrow">{new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date())}</p><h1>{person.isSelf ? `${greeting()}, ${firstName(profile.displayName)}.` : `Viewing ${person.possessive} plan`}</h1><p>{subtitle}</p></div><div className="intro-actions"><button className="secondary" onClick={onEdit}><Icon name="edit" /> Edit details</button><button className="secondary" onClick={exportCalendar} disabled={!canExport} title={canExport ? undefined : "No dated actions to export yet"}><Icon name="download" /> Export calendar</button><button className="icon-action" onClick={() => window.print()} aria-label="Print action plan" title="Print action plan"><Icon name="print" /></button></div></section>
 
     {next ? <>
       {missing.length ? <section className="missing-card"><div className="missing-icon"><Icon name="alert" /></div><div><h2>{missing.length} date{s(missing.length)} missing from {whose} plan</h2><p>Some actions can’t be shown until these are saved.</p><ul>{missing.map((field) => <li key={field}>{field}</li>)}</ul><button onClick={onEdit}>Add missing dates <Icon name="arrow" /></button></div></section> : null}
@@ -516,6 +518,7 @@ function ProfilesView({ profiles, activeProfileId, person, switchingTo, onSelect
             <div className="profile-card-body">
               <h3>{profileLabel(item, idx)} {item.isPrimary ? <span className="tag neutral">You</span> : null} {isActive ? <span className="tag accent">Viewing now</span> : null}</h3>
               <p>{describeProfile(item)}</p>
+              {item.isPrimary && profiles.length > 1 ? <p className="profile-card-note">This is your own profile, so it can’t be deleted. You can rename it or edit its details.</p> : null}
               {isRenaming && <form className="inline-rename-form" onSubmit={(event) => void submitRename(event, itemId)}>
                 <input value={renameDraft} maxLength={100} onChange={(event) => setRenameDraft(event.target.value)} placeholder="Name (e.g. spouse, child)" required aria-label="New profile name" />
                 <button type="submit" className="primary" disabled={busy || !renameDraft.trim()}>Save</button>
@@ -547,6 +550,10 @@ function DocumentsView({ profileId, person, documents, onChanged, notify }: { pr
   const pick = (file?: File) => {
     if (fileRef.current) fileRef.current.value = "";
     if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      notify(`${file.name} is ${formatBytes(file.size)}. Files can be up to 10 MB; try a smaller scan or a PDF.`, "error");
+      return;
+    }
     setPending(file);
     setKind(guessDocumentKind(file.name));
     window.setTimeout(() => typeRef.current?.focus(), 0);
@@ -637,7 +644,7 @@ function CasesView({ profileId, person, cases, onChanged, notify }: { profileId?
     catch (error) { notify(error instanceof Error ? error.message : "Unable to remove case.", "error"); }
   };
 
-  return <div className="page"><section className="page-intro"><div><p className="eyebrow">Cases</p><h1>{person.possessiveCap} USCIS receipts</h1><p>Save the receipt number from each USCIS notice, then open the official USCIS status page for it in one tap.</p></div></section><form className="case-form" onSubmit={submit}><div><label htmlFor="case-receipt">Receipt number</label><input id="case-receipt" aria-describedby="case-receipt-hint" value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value.toUpperCase())} placeholder="IOE1234567890" maxLength={15} required /><small id="case-receipt-hint">3 letters + 10 digits, printed as “Receipt Number” near the top of the notice</small></div><div><label htmlFor="case-form-type">Form <em>(optional)</em></label><input id="case-form-type" aria-describedby="case-form-hint" value={formType} onChange={(event) => setFormType(event.target.value)} placeholder="I-765" /><small id="case-form-hint">Shown on the notice, e.g. I-765</small></div><div><label htmlFor="case-nickname">Nickname <em>(optional)</em></label><input id="case-nickname" value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="Work permit renewal" /><small>Only you see this</small></div><button className="primary" disabled={saving}><Icon name="plus" /> {saving ? "Saving…" : "Save receipt"}</button></form>
+  return <div className="page"><section className="page-intro"><div><p className="eyebrow">Cases</p><h1>{person.possessiveCap} USCIS receipts</h1><p>Save the receipt number from each USCIS notice, then open the official USCIS status page for it in one tap.</p></div></section><form className="case-form" onSubmit={submit}><div><label htmlFor="case-receipt">Receipt number</label><input id="case-receipt" aria-describedby="case-receipt-hint" value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value.toUpperCase())} placeholder="IOE1234567890" maxLength={15} required /><small id="case-receipt-hint">3 letters + 10 digits, printed as “Receipt Number” near the top of the notice</small></div><div><label htmlFor="case-form-type">Form <em>(optional)</em></label><input id="case-form-type" aria-describedby="case-form-hint" list="case-form-options" value={formType} onChange={(event) => setFormType(event.target.value)} placeholder="I-765" /><datalist id="case-form-options">{COMMON_FORMS.map((form) => <option key={form} value={form} />)}</datalist><small id="case-form-hint">Shown on the notice as “Form Type”, e.g. I-765</small></div><div><label htmlFor="case-nickname">Nickname <em>(optional)</em></label><input id="case-nickname" aria-describedby="case-nickname-hint" value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="Work permit renewal" /><small id="case-nickname-hint">Only you see this. Saving a receipt number again updates its form and nickname.</small></div><button className="primary" disabled={saving}><Icon name="plus" /> {saving ? "Saving…" : "Save receipt"}</button></form>
 
     <div className="case-list">{cases.map((item) => <article className="case-card" key={item.id}><div className="case-form-badge">{item.formType || <Icon name="case" />}</div><div><span>{item.nickname || (item.formType ? `Form ${item.formType}` : "USCIS filing")}</span><h2>{item.receiptNumber}</h2><p>Saved {formatDateTime(item.createdAt)}</p></div><a className="secondary" href={`https://egov.uscis.gov/casestatus/mycasestatus.do?appReceiptNum=${encodeURIComponent(item.receiptNumber)}`} target="_blank" rel="noreferrer">Open official status <Icon name="external" /></a><button className="icon-action danger" onClick={() => void remove(item)} aria-label={`Remove receipt ${item.receiptNumber}`}><Icon name="trash" /></button></article>)}</div>
     {!cases.length && <EmptyState icon="case" title={`No receipts saved for ${person.isSelf ? "you" : person.name} yet`} copy="When USCIS accepts a filing, it mails a receipt notice (Form I-797C). Enter its receipt number above to keep it here." />}
@@ -669,11 +676,15 @@ function AssistantView({ profileId, person, plan }: { profileId?: string; person
 
 function Onboarding({ mode = "initial", onCancel, onSaved }: { mode?: "initial" | "add"; onCancel?: () => void; onSaved: (createdProfileId?: string) => void }) {
   const [draft, setDraft] = useState<ImmigrationProfile>({ ...EMPTY_PROFILE });
+  // No stage is preselected: the user picks one before the date fields and submit appear.
+  const [stageChosen, setStageChosen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const save = async (event: FormEvent) => {
-    event.preventDefault(); setSaving(true); setError("");
+    event.preventDefault();
+    if (!stageChosen) { setError("Choose a stage in step 1 first."); return; }
+    setSaving(true); setError("");
     try {
       const response = await api<{ profile?: ImmigrationProfile }>("/api/profile", {
         method: mode === "add" ? "POST" : "PUT",
@@ -686,7 +697,7 @@ function Onboarding({ mode = "initial", onCancel, onSaved }: { mode?: "initial" 
     }
   };
 
-  return <main className="onboarding-shell"><header><Brand /><span>Private beta · General information only</span>{onCancel && <button type="button" className="secondary" onClick={onCancel}>Cancel</button>}</header><div className="onboarding-grid"><section className="onboarding-copy"><p className="eyebrow">Your dates, in one place</p><h1>{mode === "add" ? "Add a family profile." : "Know what matters next."}</h1><p>Start with the dates you know. Save a personal checklist, track your receipts, and export dates to your calendar. Document upload is optional; you can add more details later.</p><div className="trust-list"><div><Icon name="plan" /><span><strong>Your saved dates</strong><small>Review the inputs and official guidance.</small></span></div><div><Icon name="shield" /><span><strong>A simple checklist</strong><small>Mark tasks done and pick up where you left off.</small></span></div><div><Icon name="spark" /><span><strong>Start small</strong><small>Choose your current stage; add details later.</small></span></div></div></section><form className="onboarding-card" onSubmit={save}><div className="step-label"><span>1</span><div><small>Step 1</small><strong>{mode === "add" ? "Where is this family member now?" : "Where are you now?"}</strong></div></div><div className="stage-grid">{STAGES.map((stage) => <button type="button" className={draft.lifecycleStage === stage.id ? "selected" : ""} onClick={() => stage.id !== draft.lifecycleStage && setDraft({ ...draft, lifecycleStage: stage.id, statusSubtype: stageDefaults(stage.id, draft.displayName).statusSubtype, admissionBasis: stageDefaults(stage.id, draft.displayName).admissionBasis })} key={stage.id}><span><b>{stage.label}</b><small>{stage.short}</small></span></button>)}</div><div className="step-label second"><span>2</span><div><small>Step 2</small><strong>Add the dates you know</strong><em className="step-hint">All optional. You can add the rest later.</em></div></div><ProfileFields draft={draft} setDraft={setDraft} nameLabel={mode === "add" ? "Their name" : "Your name"} namePlaceholder={mode === "add" ? "e.g. Mia, or “my spouse”" : "Name or nickname (optional)"} compact />{error && <p className="form-error">{error}</p>}<button className="primary wide" disabled={saving}>{saving ? "Building your plan…" : mode === "add" ? "Add family member" : "Create my action plan"} <Icon name="arrow" /></button><p className="form-disclaimer">Your entries are saved to your signed-in account. Start without uploading documents. This checklist is not legal advice or an eligibility decision.</p></form></div></main>;
+  return <main className="onboarding-shell"><header><Brand /><span>Private beta · General information only</span>{onCancel && <button type="button" className="secondary" onClick={onCancel}>Cancel</button>}</header><div className="onboarding-grid"><section className="onboarding-copy"><p className="eyebrow">Your dates, in one place</p><h1>{mode === "add" ? "Add a family profile." : "Know what matters next."}</h1><p>Start with the dates you know. Save a personal checklist, track your receipts, and export dates to your calendar. Document upload is optional; you can add more details later.</p><div className="trust-list"><div><Icon name="plan" /><span><strong>Your saved dates</strong><small>Review the inputs and official guidance.</small></span></div><div><Icon name="shield" /><span><strong>A simple checklist</strong><small>Mark tasks done and pick up where you left off.</small></span></div><div><Icon name="spark" /><span><strong>Start small</strong><small>Choose your current stage; add details later.</small></span></div></div></section><form className="onboarding-card" onSubmit={save}><div className="step-label"><span>1</span><div><small>Step 1</small><strong>{mode === "add" ? "Where is this family member now?" : "Where are you now?"}</strong></div></div><div className="stage-grid">{STAGES.map((stage) => { const selected = stageChosen && draft.lifecycleStage === stage.id; return <button type="button" className={selected ? "selected" : ""} aria-pressed={selected} onClick={() => { setStageChosen(true); setError(""); if (stage.id !== draft.lifecycleStage) setDraft({ ...draft, lifecycleStage: stage.id, statusSubtype: stageDefaults(stage.id, draft.displayName).statusSubtype, admissionBasis: stageDefaults(stage.id, draft.displayName).admissionBasis }); }} key={stage.id}><span><b>{stage.label}</b><small>{stage.short}</small></span></button>; })}</div><div className="step-label second"><span>2</span><div><small>Step 2</small><strong>Add the dates you know</strong><em className="step-hint">{stageChosen ? "All optional. You can add the rest later." : "Choose a stage above to see which dates apply."}</em></div></div>{stageChosen && <ProfileFields draft={draft} setDraft={setDraft} nameLabel={mode === "add" ? "Their name" : "Your name"} namePlaceholder={mode === "add" ? "e.g. Mia, or “my spouse”" : "Name or nickname (optional)"} compact />}{error && <p className="form-error">{error}</p>}<button className="primary wide" disabled={saving || !stageChosen}>{saving ? "Building your plan…" : !stageChosen ? "Choose a stage to continue" : mode === "add" ? "Add family member" : "Create my action plan"} <Icon name="arrow" /></button><p className="form-disclaimer">Your entries are saved to your signed-in account. Start without uploading documents. This checklist is not legal advice or an eligibility decision.</p></form></div></main>;
 }
 
 function ProfileDialog({ profile, canDelete, onDelete, onClose, onSaved }: { profile: ImmigrationProfile; canDelete?: boolean; onDelete?: () => Promise<void>; onClose: () => void; onSaved: () => Promise<void> }) {
@@ -698,7 +709,7 @@ function ProfileDialog({ profile, canDelete, onDelete, onClose, onSaved }: { pro
     try { await api("/api/profile", { method: "PUT", body: JSON.stringify({ ...draft, profileId: profile.id }) }); await onSaved(); }
     catch (err) { setError(err instanceof Error ? err.message : "Unable to save profile."); setSaving(false); }
   };
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="profile-dialog" onSubmit={save} role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="dialog-head"><div><p className="eyebrow">Edit details</p><h2 id="profile-title">{profile.displayName.trim() ? `${profile.displayName.trim()}’s details` : profile.isPrimary ? "Your details" : "Profile details"}</h2><p className="dialog-sub">Change the stage or dates. The action plan updates when you save.</p></div><button type="button" className="icon-action" onClick={onClose} aria-label="Close"><Icon name="close" /></button></div><div className="stage-tabs">{STAGES.map((stage) => <button type="button" className={draft.lifecycleStage === stage.id ? "active" : ""} onClick={() => stage.id !== draft.lifecycleStage && setDraft({ ...draft, lifecycleStage: stage.id, statusSubtype: stageDefaults(stage.id, draft.displayName).statusSubtype, admissionBasis: stageDefaults(stage.id, draft.displayName).admissionBasis })} key={stage.id} aria-pressed={draft.lifecycleStage === stage.id}>{stage.label}<small>{stage.short}</small></button>)}</div><ProfileFields draft={draft} setDraft={setDraft} nameLabel={profile.isPrimary ? "Your name" : "Name"} />{error && <p className="form-error">{error}</p>}<div className="dialog-actions">{canDelete && onDelete && <button type="button" className="secondary danger-text" onClick={() => void onDelete()} disabled={saving}>Delete profile</button>}<button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={saving}>{saving ? "Saving…" : "Save and update plan"}</button></div></form></div>;
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="profile-dialog" onSubmit={save} role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="dialog-head"><div><p className="eyebrow">Edit details</p><h2 id="profile-title">{profile.displayName.trim() ? `${profile.displayName.trim()}’s details` : profile.isPrimary ? "Your details" : "Profile details"}</h2><p className="dialog-sub">Change the stage or dates. The action plan updates when you save.</p></div><button type="button" className="icon-action" onClick={onClose} aria-label="Close"><Icon name="close" /></button></div><div className="stage-tabs">{STAGES.map((stage) => <button type="button" className={draft.lifecycleStage === stage.id ? "active" : ""} onClick={() => stage.id !== draft.lifecycleStage && setDraft({ ...draft, lifecycleStage: stage.id, statusSubtype: stageDefaults(stage.id, draft.displayName).statusSubtype, admissionBasis: stageDefaults(stage.id, draft.displayName).admissionBasis })} key={stage.id} aria-pressed={draft.lifecycleStage === stage.id}>{stage.label}<small>{stage.short}</small></button>)}</div>{draft.lifecycleStage !== profile.lifecycleStage && <p className="stage-change-note" role="status"><Icon name="info" size={16} /><span>Changing the stage resets the status choice. Dates saved for the old stage are kept but not shown here, and only dates used by the new stage appear in the plan.</span></p>}<ProfileFields draft={draft} setDraft={setDraft} nameLabel={profile.isPrimary ? "Your name" : "Name"} />{error && <p className="form-error">{error}</p>}<div className="dialog-actions">{canDelete && onDelete && <button type="button" className="secondary danger-text" onClick={() => void onDelete()} disabled={saving}>Delete profile</button>}<button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={saving}>{saving ? "Saving…" : "Save and update plan"}</button></div></form></div>;
 }
 
 // Where-to-find hints describe where a date is printed. They are not advice about what the date means.
@@ -709,7 +720,7 @@ const HINTS = {
   programEnd: "“Program End Date” on page 1 of your Form I-20.",
   i94: "“Admit Until Date” on your most recent I-94 record (i94.cbp.dhs.gov).",
   ead: "“Card Expires” on the front of your work permit (EAD card).",
-  visa: "“Expiration Date” on the visa in your passport.",
+  visa: "“Expiration Date” on the visa in your passport. Kept for your records; it doesn’t create a reminder.",
   h1bStatus: "H-1B if you hold the job; H-4 if you are the spouse or child of an H-1B worker.",
   gcStep: "The most recent step filed in your green card case.",
   priority: "“Priority Date” on your I-140 receipt or approval notice (Form I-797).",
@@ -750,7 +761,11 @@ function DateField({ label, hint, value, onChange, required = false }: { label: 
 
 function EmptyState({ icon, title, copy }: { icon: string; title: string; copy: string }) { return <div className="empty-state"><span><Icon name={icon} /></span><h2>{title}</h2><p>{copy}</p></div>; }
 function LoadingScreen() { return <main className="center-screen"><Brand /><span className="large-spinner" /><p>Loading your immigration workspace…</p></main>; }
-function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) { return <main className="center-screen error-screen"><span className="error-mark"><Icon name="alert" /></span><h1>Workspace unavailable</h1><p>{message}</p><button className="primary" onClick={onRetry}>Try again</button><a href="/auth/login">Sign in</a></main>; }
+// When the session has ended, "Sign in" is the main action; for other failures it is "Try again".
+function ErrorScreen({ message, signIn, onRetry }: { message: string; signIn: boolean; onRetry: () => void }) {
+  return <main className="center-screen error-screen"><span className="error-mark"><Icon name="alert" /></span><h1>{signIn ? "Please sign in again" : "Workspace unavailable"}</h1><p>{message}</p>
+    {signIn ? <><a className="primary" href="/auth/login">Sign in</a><button type="button" className="secondary" onClick={onRetry}>Try again</button></> : <><button type="button" className="primary" onClick={onRetry}>Try again</button><a href="/auth/login">Sign in</a></>}</main>;
+}
 function Brand({ mobile = false }: { mobile?: boolean }) { return <div className={mobile ? "brand mobile-brand" : "brand"}><span className="brand-mark">I</span><span>Immigrant<b>OS</b></span></div>; }
 
 class ApiError extends Error {
@@ -808,6 +823,8 @@ function distance(days: number) {
   if (days < 730) return `${Math.round(days / 30.44)} months`;
   return `${Math.round(days / 365.25)} years`;
 }
+// Suggestions only; the Form field stays free text.
+const COMMON_FORMS = ["I-765", "I-485", "I-131", "I-140", "I-130", "I-539", "I-129", "I-90", "I-751", "N-400"];
 // Stored `kind` values are unchanged; only the visible labels are friendlier.
 const DOCUMENT_KIND_OPTIONS: [string, string][] = [["Passport", "Passport"], ["Visa", "Visa (in passport)"], ["Form I-20", "Form I-20"], ["I-94", "I-94 arrival record"], ["EAD", "Work permit (EAD card)"], ["USCIS notice", "USCIS notice (I-797)"], ["Green Card", "Green Card"], ["Other", "Other"]];
 const DOCUMENT_KINDS: Record<string, string> = Object.fromEntries(DOCUMENT_KIND_OPTIONS);
@@ -824,6 +841,7 @@ function guessDocumentKind(filename: string) {
   if (/visa/.test(name)) return "Visa";
   return "";
 }
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 function formatBytes(bytes: number) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 function formatDateTime(value: string) { const date = new Date(value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`); return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date); }
 

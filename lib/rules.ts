@@ -164,8 +164,8 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
       id: "gc-visa-bulletin",
       title: "Review the current Visa Bulletin",
       description: profile.priorityDate
-        ? `Your saved priority date is ${formatDate(profile.priorityDate)}. Compare it with the correct employment or family category and country column; this product does not infer those missing facts.`
-        : "Add your priority date, preference category, and chargeability country before any personalized availability check.",
+        ? `Your saved priority date is ${formatDate(profile.priorityDate)}. Compare it with the correct employment or family category and country column; this product does not infer those missing facts. The Department of State publishes a new Visa Bulletin each month, so this reminder returns on the 1st of every month.`
+        : "Add your priority date, preference category, and chargeability country before any personalized availability check. The Department of State publishes a new Visa Bulletin each month, so this reminder returns on the 1st of every month.",
       dueDate: firstDayNextMonth(),
       severity: "important",
       confidence: "needs-review",
