@@ -85,6 +85,23 @@ test("extension helper API: timeline, editable requested-until, per-profile chec
       assert.equal(ext.timeline.requestedUntilDate, "2028-01-06");
       assert.equal(ext.timeline.savedRequestedUntilIgnored, true);
     });
+
+    await t.test("visitor without an I-94 date: no dates computed, edits and checklist toggles rejected", async () => {
+      const dad = (await ok(web(a, "/api/profile", "POST", { displayName: "Dad", lifecycleStage: "VISITOR", statusSubtype: "B2" }))).profile;
+      const dq = `?profileId=${encodeURIComponent(dad.id)}`;
+      const { extension } = await ok(web(a, `/api/extension${dq}`));
+      assert.equal(extension.available, false);
+      assert.equal(extension.reason, "missing-i94");
+      assert.equal(extension.timeline, undefined);
+      assert.equal(extension.checklist, undefined);
+      const put = await web(a, `/api/extension${dq}`, "PUT", { requestedUntil: "2027-07-06" });
+      assert.equal(put.status, 400);
+      assert.match((await put.json()).error, /I-94 admit-until date/);
+      assert.equal((await web(a, `/api/actions${dq}`, "POST", { actionKey: "i539:2027-01-06:statement-letter", completed: true })).status, 400);
+      // Once the I-94 date is entered, the dates appear.
+      await ok(web(a, `/api/profile${dq}`, "PUT", { displayName: "Dad", lifecycleStage: "VISITOR", statusSubtype: "B2", i94ExpirationDate: "2027-01-06" }));
+      assert.equal((await ok(web(a, `/api/extension${dq}`))).extension.timeline.recommendedFileByDate, "2026-11-22");
+    });
   } finally {
     DB.close();
   }

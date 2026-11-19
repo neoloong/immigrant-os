@@ -98,3 +98,56 @@ test("helper is only available for visitor profiles with an I-94 date", () => {
   assert.equal(ext.buildExtensionHelper({ lifecycleStage: "F1", i94ExpirationDate: "2027-01-06" }).reason, "not-visitor");
   assert.equal(ext.buildExtensionHelper({ lifecycleStage: "VISITOR", i94ExpirationDate: null }).reason, "missing-i94");
 });
+
+test("edge: missing or malformed I-94 date never computes dates; it explains what to enter", () => {
+  for (const i94 of [null, undefined, "", "   ", "01/06/2027", "2027-02-30", "not a date"]) {
+    const helper = ext.buildExtensionHelper({ lifecycleStage: "VISITOR", statusSubtype: "B2", i94ExpirationDate: i94, extensionRequestedUntil: "2027-07-06" }, ["i539:2027-01-06:account-ready"], "2026-11-19");
+    assert.equal(helper.available, false, String(i94));
+    assert.equal(helper.reason, "missing-i94");
+    assert.equal(helper.timeline, undefined, "no timeline is computed");
+    assert.equal(helper.checklist, undefined, "no checklist is computed");
+    assert.equal(helper.disclaimer, ext.DRAFT_LABEL);
+    assert.ok(helper.sources.some((s) => s.url === "https://www.uscis.gov/i-539"));
+  }
+  // Not-visitor wins over missing-I-94 so the user is told the right thing to change first.
+  assert.equal(ext.buildExtensionHelper({ lifecycleStage: "H1B", i94ExpirationDate: null }).reason, "not-visitor");
+});
+
+test("edge: requested-until on or before the I-94 date is rejected; the day after is accepted", () => {
+  const i94 = "2027-01-06";
+  for (const bad of ["2027-01-06", "2027-01-05", "2026-11-19", "2024-09-08"]) {
+    assert.throws(() => ext.validateRequestedUntil(i94, bad), /after the I-94/, bad);
+  }
+  for (const bad of [null, undefined, "", "2027-7-6", "2027-07-06T00:00:00Z"]) {
+    assert.throws(() => ext.validateRequestedUntil(i94, bad), /YYYY-MM-DD/, String(bad));
+  }
+  assert.equal(ext.validateRequestedUntil(i94, "2027-01-07"), "2027-01-07");
+  // A saved value equal to or before the I-94 date is never shown as the request.
+  for (const saved of ["2027-01-06", "2026-12-01"]) {
+    const t = ext.buildExtensionTimeline(i94, saved, "2026-11-19");
+    assert.equal(t.requestedUntilDate, "2027-07-06");
+    assert.equal(t.requestedUntilIsDefault, true);
+    assert.equal(t.savedRequestedUntilIgnored, true);
+  }
+  const nextDay = ext.buildExtensionTimeline(i94, "2027-01-07", "2026-11-19");
+  assert.equal(nextDay.requestedUntilDate, "2027-01-07");
+  assert.equal(nextDay.savedRequestedUntilIgnored, false);
+});
+
+test("checklist state: progress counts required vs optional, ignores unknown keys and earlier rounds", () => {
+  const keys = (ids, round = "2027-01-06") => ids.map((id) => `i539:${round}:${id}`);
+  const profile = { lifecycleStage: "VISITOR", statusSubtype: "B2", i94ExpirationDate: "2027-01-06" };
+  const helper = ext.buildExtensionHelper(profile, [
+    ...keys(["account-ready", "statement-letter", "preparer", "interpreter"]),
+    ...keys(["fee-check"], "2024-09-08"),
+    "i539:2027-01-06:bogus",
+    "visitor-i94-end",
+  ], "2026-11-19");
+  assert.deepEqual(helper.progress, { done: 4, total: 13, requiredDone: 2, requiredTotal: 10 });
+  const all = ext.buildExtensionHelper(profile, ext.extensionChecklistKeys("2027-01-06"), "2026-11-19");
+  assert.deepEqual(all.progress, { done: 13, total: 13, requiredDone: 10, requiredTotal: 10 });
+  // Changing only the requested-until date keeps the same round and the same keys.
+  const edited = ext.buildExtensionHelper({ ...profile, extensionRequestedUntil: "2027-05-01" }, keys(["account-ready"]), "2026-11-19");
+  assert.equal(edited.progress.done, 1);
+  assert.match(edited.checklist.find((i) => i.itemId === "form-requested-until").title, /2027-05-01/);
+});
