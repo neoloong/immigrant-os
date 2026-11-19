@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import type { ImmigrationProfile, LifecycleStage } from "../lib/profile";
 import type { PlanItem, PlanResult, Source } from "../lib/rules";
 import AgentConnect from "./agent-settings";
@@ -27,13 +27,13 @@ const EMPTY_PROFILE: ImmigrationProfile = {
   naturalizationBasis: "five_year",
 };
 
-const STAGES: { id: LifecycleStage; label: string; short: string; coverage: string }[] = [
-  { id: "F1", label: "F-1 / OPT", short: "Study & work", coverage: "Beta" },
-  { id: "H1B", label: "H-1B / H-4", short: "Temporary worker", coverage: "Beta" },
-  { id: "VISITOR", label: "Visitor (B1/B2)", short: "Temporary visitor", coverage: "Beta" },
-  { id: "GREEN_CARD", label: "Green card", short: "Permanent residence process", coverage: "Beta" },
-  { id: "LPR", label: "Permanent resident", short: "Maintain & renew", coverage: "Beta" },
-  { id: "CITIZENSHIP", label: "Citizenship", short: "Naturalization", coverage: "Beta" },
+const STAGES: { id: LifecycleStage; label: string; short: string }[] = [
+  { id: "F1", label: "F-1 / OPT", short: "Study & work" },
+  { id: "H1B", label: "H-1B / H-4", short: "Temporary worker" },
+  { id: "VISITOR", label: "Visitor (B1/B2)", short: "Temporary visitor" },
+  { id: "GREEN_CARD", label: "Green card", short: "Permanent residence process" },
+  { id: "LPR", label: "Permanent resident", short: "Maintain & renew" },
+  { id: "CITIZENSHIP", label: "Citizenship", short: "Naturalization" },
 ];
 
 const NAV: { id: View; label: string; short: string; icon: string }[] = [
@@ -45,13 +45,22 @@ const NAV: { id: View; label: string; short: string; icon: string }[] = [
   { id: "settings", label: "Settings", short: "Settings", icon: "gear" },
 ];
 
-const STAGE_LABELS: Record<string, string> = {
-  STUDENT: "Student", OPT: "Post-completion OPT", STEM_OPT: "STEM OPT",
-  H1B: "H-1B", H4: "H-4", B1_B2: "Visitor (B1/B2)",
-  PERM: "PERM (labor certification)", I140: "I-140 petition", I485: "I-485 (adjustment of status)", CONSULAR: "Consular processing",
+// Plain-language names for status codes. The same wording is used in the form dropdowns,
+// the profile switcher, the Profiles page and Settings, so users never see a raw code.
+const STATUS_LABELS: Record<string, string> = {
+  STUDENT: "Student", OPT: "Working on OPT", STEM_OPT: "STEM OPT extension",
+  H1B: "H-1B worker", H4: "H-4 family member", B1_B2: "Visitor (B1/B2)",
+  PERM: "Labor certification (PERM)", I140: "Immigrant petition (I-140)", I485: "Applying from inside the U.S. (I-485)", CONSULAR: "Visa interview abroad (consular)",
 };
-function statusLabel(code: string) { return STAGE_LABELS[code] ?? code; }
-function stageLabel(stage: LifecycleStage) { return STAGES.find((item) => item.id === stage)?.label ?? stage; }
+const STATUS_OPTIONS: Record<string, string[]> = { F1: ["STUDENT", "OPT", "STEM_OPT"], H1B: ["H1B", "H4"], GREEN_CARD: ["PERM", "I140", "I485", "CONSULAR"] };
+function statusLabel(code: string) { return STATUS_LABELS[code] ?? "Not set"; }
+function stageLabel(stage: LifecycleStage) { return STAGES.find((item) => item.id === stage)?.label ?? "Not set"; }
+// "Green card · Applying from inside the U.S. (I-485)"; the sub-step is omitted when it only repeats the stage.
+function describeProfile(item: ImmigrationProfile) {
+  const stage = stageLabel(item.lifecycleStage);
+  const showStatus = item.statusSubtype && STATUS_OPTIONS[item.lifecycleStage]?.includes(item.statusSubtype);
+  return showStatus ? `${stage} · ${statusLabel(item.statusSubtype)}` : stage;
+}
 
 type Workspace = { profile: ImmigrationProfile | null; profiles: ImmigrationProfile[]; plan: PlanResult | null; documents: SavedDocument[]; cases: TrackedCase[] };
 type ToastState = { message: string; tone: "success" | "error" };
@@ -345,7 +354,7 @@ function ProfileSwitcher({ profiles, active, switchingTo, onSelect, onAdd, onMan
         const isActive = item.id === active.id;
         return <button type="button" role="menuitemradio" aria-checked={isActive} key={item.id ?? idx} className={isActive ? "current" : ""} disabled={!!switchingTo} onClick={close(() => { if (item.id && !isActive) onSelect(item.id); })}>
           <span className="avatar">{initials(item.displayName)}</span>
-          <span className="switcher-item-text"><strong>{profileLabel(item, idx)}{item.isPrimary ? <em> · You</em> : null}</strong><small>{stageLabel(item.lifecycleStage)}</small></span>
+          <span className="switcher-item-text"><strong>{profileLabel(item, idx)}{item.isPrimary ? <em> · You</em> : null}</strong><small>{describeProfile(item)}</small></span>
           {isActive && <Icon name="check" size={18} />}
         </button>;
       })}
@@ -361,9 +370,9 @@ function ProfileSwitcher({ profiles, active, switchingTo, onSelect, onAdd, onMan
 
 function SettingsPage({ profile, person, onEdit, onManageProfiles }: { profile: ImmigrationProfile; person: Person; onEdit: () => void; onManageProfiles: () => void }) {
   return <div className="page settings-page">
-    <section className="page-intro"><div><p className="eyebrow">SETTINGS</p><h1>{person.possessiveCap} settings</h1><p>Edit {person.isSelf ? "your" : person.possessive} immigration details, or manage your account.</p></div></section>
+    <section className="page-intro"><div><p className="eyebrow">Settings</p><h1>{person.possessiveCap} settings</h1><p>Edit {person.isSelf ? "your" : person.possessive} immigration details, or manage your account.</p></div></section>
     <section className="settings-card">
-      <div><h2>{person.possessiveCap} profile details</h2><p>{stageLabel(profile.lifecycleStage)}{profile.statusSubtype ? ` · ${statusLabel(profile.statusSubtype)}` : ""}. Dates you enter here build the action plan.</p></div>
+      <div><h2>{person.possessiveCap} profile details</h2><p>{describeProfile(profile)}. The dates saved here build {person.isSelf ? "your" : person.possessive} action plan.</p></div>
       <div className="settings-actions"><button type="button" className="primary" onClick={onEdit}><Icon name="edit" /> Edit details</button><button type="button" className="secondary" onClick={onManageProfiles}><Icon name="users" /> Manage profiles</button></div>
     </section>
     <section className="settings-card">
@@ -403,19 +412,40 @@ function PlanView({ profile, person, plan, documents, cases, onEdit, onNavigate,
     }
   };
 
+  const items = plan?.items ?? [];
+  const missing = plan?.missingFields ?? [];
+  const doneCount = items.length - openItems.length;
+  const whose = person.isSelf ? "your" : person.possessive;
+  const addDatesTitle = person.isSelf ? "Add your dates to see your plan" : `Add ${person.possessive} dates to see the plan`;
+  const s = (count: number) => count === 1 ? "" : "s";
+  const subtitle = openItems.length
+    ? `${openItems.length} open action${s(openItems.length)}, built from ${whose} saved dates.${missing.length ? ` Add ${missing.length} more date${s(missing.length)} to complete the plan.` : ""}`
+    : missing.length ? `The plan is built from the dates you save. ${missing.length} date${s(missing.length)} still missing.` : items.length ? "Everything in this plan is marked complete." : "Add more dates to get reminders.";
+
   return <div className="page plan-page">
-    <section className="page-intro"><div><p className="eyebrow">{new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</p><h1>{person.isSelf ? `${greeting()}, ${firstName(profile.displayName)}.` : `Viewing ${person.possessive} plan`}</h1><p>{plan?.summary}</p></div><div className="intro-actions"><button className="secondary" onClick={onEdit}><Icon name="edit" /> Update profile</button><button className="secondary" onClick={exportCalendar} disabled={!openItems.some((item) => item.dueDate)}><Icon name="download" /> Export calendar</button><button className="icon-action" onClick={() => window.print()} aria-label="Print action plan"><Icon name="print" /></button></div></section>
+    <section className="page-intro"><div><p className="eyebrow">{new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date())}</p><h1>{person.isSelf ? `${greeting()}, ${firstName(profile.displayName)}.` : `Viewing ${person.possessive} plan`}</h1><p>{subtitle}</p></div><div className="intro-actions"><button className="secondary" onClick={onEdit}><Icon name="edit" /> Edit details</button><button className="secondary" onClick={exportCalendar} disabled={!openItems.some((item) => item.dueDate)} title={openItems.some((item) => item.dueDate) ? undefined : "No dated actions to export yet"}><Icon name="download" /> Export calendar</button><button className="icon-action" onClick={() => window.print()} aria-label="Print action plan"><Icon name="print" /></button></div></section>
 
-    {plan?.missingFields.length ? <section className="missing-card"><div className="missing-icon"><Icon name="alert" /></div><div><span className="overline">COMPLETE YOUR TIMELINE</span><h2>{plan.missingFields.length} profile item{plan.missingFields.length === 1 ? "" : "s"} missing</h2><ul>{plan.missingFields.map((field) => <li key={field}>{field}</li>)}</ul><button onClick={onEdit}>Add missing details <Icon name="arrow" /></button></div></section> : null}
+    {next ? <>
+      {missing.length ? <section className="missing-card"><div className="missing-icon"><Icon name="alert" /></div><div><h2>{missing.length} date{s(missing.length)} missing from {whose} plan</h2><p>Some actions can’t be shown until these are saved.</p><ul>{missing.map((field) => <li key={field}>{field}</li>)}</ul><button onClick={onEdit}>Add missing dates <Icon name="arrow" /></button></div></section> : null}
+      <section className={`next-action ${timing(next).tone}`} aria-labelledby="next-action-title"><div className="next-date">{next.dueDate ? <><span>{month(next.dueDate)}</span><strong>{day(next.dueDate)}</strong><small>{year(next.dueDate)}</small></> : <span className="no-date">No fixed date</span>}</div><div className="next-copy"><p className="next-label">Next up</p><TagRow item={next} /><h2 id="next-action-title">{next.title}</h2><p>{next.description}</p><div className="basis"><span>Based on</span>{next.basis.map((value) => <b key={value}>{value}</b>)}</div><a href={next.source.url} target="_blank" rel="noreferrer">{next.source.label} <Icon name="external" /></a></div><button className="secondary complete-button" disabled={busy === next.id} onClick={() => toggle(next)}><Icon name="check" /> Mark done</button></section>
+    </> : missing.length ? <section className="plan-empty"><span className="plan-empty-icon"><Icon name="plan" /></span><h2>{addDatesTitle}</h2><p>Actions and reminders appear once these dates are saved. Each one shows where to find it.</p><ul>{missing.map((field) => <li key={field}>{field}</li>)}</ul><button className="primary" onClick={onEdit}><Icon name="plus" /> Add dates</button></section>
+      : items.length ? <section className="all-done"><Icon name="check" /><h2>All caught up</h2><p>Every action in {whose} plan is marked done. New actions appear when {person.isSelf ? "you update your" : `you update ${person.possessive}`} dates.</p></section>
+      : <section className="plan-empty"><span className="plan-empty-icon"><Icon name="plan" /></span><h2>Nothing to schedule yet</h2><p>Add more dates, such as a passport or work-permit expiration, to get reminders here.</p><button className="primary" onClick={onEdit}><Icon name="edit" /> Edit details</button></section>}
 
-    {next ? <section className={`next-action ${next.severity}`}><div className="next-date"><span>{next.dueDate ? month(next.dueDate) : "NEXT"}</span><strong>{next.dueDate ? day(next.dueDate) : "→"}</strong><small>{next.dueDate ? year(next.dueDate) : "ACTION"}</small></div><div className="next-copy"><div className="tag-row"><span className={`tag ${next.severity}`}>{next.dueDate && next.dueDate < localToday() ? "Past date · review" : next.severity}</span><span className={`confidence ${next.confidence}`}>{labelConfidence(next.confidence)}</span></div><h2>{next.title}</h2><p>{next.description}</p><div className="basis"><span>Calculated from</span>{next.basis.map((value) => <b key={value}>{value}</b>)}</div><a href={next.source.url} target="_blank" rel="noreferrer">{next.source.label} <Icon name="external" /></a></div><button className="complete-button" disabled={busy === next.id} onClick={() => toggle(next)}><Icon name="check" /> Mark complete</button></section> : <section className="all-done"><Icon name="check" /><h2>No open actions in the supported rules.</h2><p>There are no open actions in the supported rules for this profile.</p></section>}
+    {items.length ? <section className="section-block"><div className="section-heading"><div><h2>Everything in {whose} plan</h2></div><span>{openItems.length} open{doneCount ? ` · ${doneCount} done` : ""}</span></div>
+      <p className="review-note"><Icon name="info" size={18} /><span>Dates come from what you entered. Before acting on one, check it against the official source under “Why this date?”.</span></p>
+      <div className="action-list">{items.map((item) => <article className={`action-row ${item.completed ? "done" : ""}`} key={item.id}><button className="check-button" disabled={busy === item.id} onClick={() => toggle(item)} aria-label={item.completed ? `Mark “${item.title}” not done` : `Mark “${item.title}” done`} aria-pressed={item.completed}>{item.completed && <Icon name="check" size={14} />}</button><div className="action-date">{item.dueDate ? <><b>{month(item.dueDate)} {day(item.dueDate)}</b><span>{year(item.dueDate)}</span></> : <><b>Ongoing</b><span>No fixed date</span></>}</div><div className="action-copy"><TagRow item={item} /><h3>{item.title}</h3><p>{item.description}</p><details><summary>Why this date?</summary><ul>{item.basis.map((basis) => <li key={basis}>{basis}</li>)}</ul><a href={item.source.url} target="_blank" rel="noreferrer">{item.source.label} · {item.source.ruleVersion} <Icon name="external" /></a></details></div></article>)}</div></section> : null}
 
-    <section className="section-block"><div className="section-heading"><div><p className="eyebrow">PERSONALIZED ROADMAP</p><h2>All actions</h2></div><span>{plan?.items.length ?? 0} calculated</span></div><div className="action-list">{plan?.items.map((item) => <article className={`action-row ${item.completed ? "done" : ""}`} key={item.id}><button className="check-button" disabled={busy === item.id} onClick={() => toggle(item)} aria-label={item.completed ? "Reopen action" : "Complete action"}>{item.completed && <Icon name="check" />}</button><div className="action-date">{item.dueDate ? <><b>{month(item.dueDate)} {day(item.dueDate)}</b><span>{year(item.dueDate)}</span></> : <><b>Ongoing</b><span>No fixed date</span></>}</div><div className="action-copy"><div><span className={`tag ${item.severity}`}>{item.severity}</span><span className={`confidence ${item.confidence}`}>{labelConfidence(item.confidence)}</span></div><h3>{item.title}</h3><p>{item.description}</p><details><summary>Why this date?</summary><ul>{item.basis.map((basis) => <li key={basis}>{basis}</li>)}</ul><a href={item.source.url} target="_blank" rel="noreferrer">{item.source.label} · {item.source.ruleVersion} <Icon name="external" /></a></details></div></article>)}</div></section>
-
-    <section className="quick-grid"><button className="quick-card" onClick={() => onNavigate("documents")}><span className="quick-icon blue"><Icon name="file" /></span><div><small>DOCUMENT VAULT</small><strong>{documents.length ? `${documents.length} saved document${documents.length === 1 ? "" : "s"}` : "Add your first document"}</strong><p>PDF, JPEG, or PNG · 10 MB max</p></div><Icon name="arrow" /></button><button className="quick-card" onClick={() => onNavigate("cases")}><span className="quick-icon green"><Icon name="case" /></span><div><small>USCIS CASES</small><strong>{cases.length ? `${cases.length} receipt${cases.length === 1 ? "" : "s"} tracked` : "Add a receipt number"}</strong><p>Stored separately for each filing</p></div><Icon name="arrow" /></button><button className="quick-card" onClick={() => onNavigate("assistant")}><span className="quick-icon gold"><Icon name="spark" /></span><div><small>GROUNDED ASSISTANT</small><strong>Ask about your plan</strong><p>Answers from your saved dates and checklist</p></div><Icon name="arrow" /></button></section>
+    <section className="quick-grid"><button className="quick-card" onClick={() => onNavigate("documents")}><span className="quick-icon"><Icon name="file" /></span><div><small>Documents</small><strong>{documents.length ? `${documents.length} saved document${s(documents.length)}` : "Add your first document"}</strong><p>PDF, JPEG, or PNG · 10 MB max</p></div><Icon name="arrow" /></button><button className="quick-card" onClick={() => onNavigate("cases")}><span className="quick-icon"><Icon name="case" /></span><div><small>USCIS receipts</small><strong>{cases.length ? `${cases.length} receipt${s(cases.length)} saved` : "Add a receipt number"}</strong><p>One entry for each filing</p></div><Icon name="arrow" /></button><button className="quick-card" onClick={() => onNavigate("assistant")}><span className="quick-icon"><Icon name="spark" /></span><div><small>Assistant</small><strong>Ask about {whose} plan</strong><p>Answers from saved dates and this checklist</p></div><Icon name="arrow" /></button></section>
 
     <p className="legal-note">ImmigrantOS provides general administrative information, not legal advice. It does not determine eligibility or replace a DSO, employer counsel, accredited representative, or immigration attorney.</p>
   </div>;
+}
+
+// Plain-language "when" chip that replaces the raw critical/important/planning severity tags.
+function TagRow({ item }: { item: PlanItem }) {
+  const when = timing(item);
+  return <div className="tag-row"><span className={`tag ${when.tone}`}>{when.label}</span>{item.confidence === "preliminary" && !item.completed ? <span className="tag estimate" title="A suggested reminder date worked out from your dates, not a date shown on any document.">Suggested reminder</span> : null}</div>;
 }
 
 function ProfilesView({ profiles, activeProfileId, person, switchingTo, onSelectProfile, onAddProfile, onRenameProfile, onDeleteProfile }: {
@@ -446,27 +476,28 @@ function ProfilesView({ profiles, activeProfileId, person, switchingTo, onSelect
   };
 
   return <div className="page">
-    <section className="page-intro"><div><p className="eyebrow">PROFILES</p><h1>Family profiles</h1><p>You are viewing <strong>{person.name}</strong>. Each profile keeps its own dates, documents, and cases. Switch, rename, or add someone new.</p></div><div className="intro-actions"><button type="button" className="primary" onClick={onAddProfile}><Icon name="plus" /> Add profile</button></div></section>
+    <section className="page-intro"><div><p className="eyebrow">Profiles</p><h1>Family profiles</h1><p>You are viewing <strong>{person.name}</strong>. Each profile keeps its own dates, documents, and receipts. Open, rename, or add a family member.</p></div><div className="intro-actions"><button type="button" className="primary" onClick={onAddProfile}><Icon name="plus" /> Add a family member</button></div></section>
 
-    <div className="section-block profile-management">
-      <div className="agent-token-list">
+    <div className="section-block">
+      <div className="profile-list">
         {profiles.map((item, idx) => {
           const itemId = item.id ?? "";
           const isActive = activeProfileId === itemId;
           const isRenaming = renamingId === itemId;
           const canDelete = !item.isPrimary && profiles.length > 1;
-          return <article key={itemId || `${item.displayName}-${idx}`}>
-            <div>
-              <h3>{profileLabel(item, idx)} {item.isPrimary ? <span className="tag info">You</span> : null} {isActive ? <span className="tag planning">Viewing now</span> : null}</h3>
-              <p>{stageLabel(item.lifecycleStage)}{item.statusSubtype ? ` · ${statusLabel(item.statusSubtype)}` : ""}</p>
+          return <article className={`profile-card ${isActive ? "current" : ""}`} key={itemId || `${item.displayName}-${idx}`}>
+            <span className="avatar">{initials(item.displayName)}</span>
+            <div className="profile-card-body">
+              <h3>{profileLabel(item, idx)} {item.isPrimary ? <span className="tag neutral">You</span> : null} {isActive ? <span className="tag accent">Viewing now</span> : null}</h3>
+              <p>{describeProfile(item)}</p>
               {isRenaming && <form className="inline-rename-form" onSubmit={(event) => void submitRename(event, itemId)}>
                 <input value={renameDraft} maxLength={100} onChange={(event) => setRenameDraft(event.target.value)} placeholder="Name (e.g. spouse, child)" required aria-label="New profile name" />
                 <button type="submit" className="primary" disabled={busy || !renameDraft.trim()}>Save</button>
                 <button type="button" className="secondary" onClick={() => { setRenamingId(null); setRenameDraft(""); }}>Cancel</button>
               </form>}
             </div>
-            <div className="agent-buttons">
-              {!isActive && itemId && <button type="button" className="secondary" disabled={!!switchingTo} onClick={() => onSelectProfile(itemId)}>{switchingTo === itemId ? "Opening…" : "View this profile"}</button>}
+            <div className="profile-card-actions">
+              {!isActive && itemId && <button type="button" className="secondary" disabled={!!switchingTo} onClick={() => onSelectProfile(itemId)}>{switchingTo === itemId ? "Opening…" : "Open"}</button>}
               {itemId && !isRenaming && <button type="button" className="secondary" onClick={() => { setRenamingId(itemId); setRenameDraft(item.displayName || ""); }}>Rename</button>}
               {itemId && canDelete && <button type="button" className="secondary danger-text" disabled={busy} onClick={() => void onDeleteProfile(item)}>Delete</button>}
             </div>
@@ -513,10 +544,10 @@ function DocumentsView({ profileId, person, documents, onChanged, notify }: { pr
     }
   };
 
-  return <div className="page"><section className="page-intro"><div><p className="eyebrow">PRIVATE DOCUMENT VAULT</p><h1>{person.possessiveCap} documents</h1><p>Your files are stored privately with your signed-in account.</p></div></section><section className="upload-panel"><div className="upload-mark"><Icon name="upload" /></div><div><h2>Add a document</h2><p>Save a PDF, JPEG, or PNG. OCR and field extraction are not enabled in this build, so use Profile to enter confirmed dates.</p></div><label><span>Document type</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option>Passport</option><option>Visa</option><option>Form I-20</option><option>I-94</option><option>EAD</option><option>USCIS notice</option><option>Green Card</option><option>Other</option></select></label><input ref={fileRef} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => void upload(event.target.files?.[0])} /><button className="primary" disabled={uploading} onClick={() => fileRef.current?.click()}><Icon name="upload" /> {uploading ? "Uploading…" : "Choose file"}</button></section>
+  return <div className="page"><section className="page-intro"><div><p className="eyebrow">Documents</p><h1>{person.possessiveCap} documents</h1><p>Files are private to your signed-in account. Only you can download or delete them.</p></div></section><section className="upload-panel"><div className="upload-mark"><Icon name="upload" /></div><div><h2>Add a document</h2><p>Choose the document type, then pick a PDF, JPEG, or PNG (up to 10 MB). Dates are not read from files, so also enter them in Edit details.</p></div><label><span>Document type</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option>Passport</option><option value="Visa">Visa (in passport)</option><option value="Form I-20">Form I-20</option><option value="I-94">I-94 arrival record</option><option value="EAD">Work permit (EAD card)</option><option value="USCIS notice">USCIS notice (I-797)</option><option value="Green Card">Green Card</option><option>Other</option></select></label><input ref={fileRef} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => void upload(event.target.files?.[0])} /><button className="primary" disabled={uploading} onClick={() => fileRef.current?.click()}><Icon name="upload" /> {uploading ? "Uploading…" : "Choose file"}</button></section>
 
-    <div className="section-heading document-heading"><div><p className="eyebrow">SAVED FILES</p><h2>{documents.length} document{documents.length === 1 ? "" : "s"}</h2></div><span>Maximum 10 MB each</span></div>
-    {documents.length ? <div className="document-list">{documents.map((document) => <article className="document-row" key={document.id}><span className="document-icon"><Icon name="file" /></span><div><span className="tag info">{document.kind}</span><h3>{document.filename}</h3><p>{formatBytes(document.sizeBytes)} · Uploaded {formatDateTime(document.uploadedAt)}</p></div><a className="icon-action" href={`/api/documents?download=${encodeURIComponent(document.id)}${profileParam}`} aria-label={`Download ${document.filename}`}><Icon name="download" /></a><button className="icon-action danger" onClick={() => void remove(document)} aria-label={`Delete ${document.filename}`}><Icon name="trash" /></button></article>)}</div> : <EmptyState icon="file" title="No saved documents" copy="Upload one document to test the real vault flow." />}
+    <div className="section-heading document-heading"><div><h2>{documents.length ? `${documents.length} saved document${documents.length === 1 ? "" : "s"}` : "Saved documents"}</h2></div></div>
+    {documents.length ? <div className="document-list">{documents.map((document) => <article className="document-row" key={document.id}><span className="document-icon"><Icon name="file" /></span><div><span className="tag neutral">{documentKindLabel(document.kind)}</span><h3>{document.filename}</h3><p>{formatBytes(document.sizeBytes)} · Uploaded {formatDateTime(document.uploadedAt)}</p></div><a className="icon-action" href={`/api/documents?download=${encodeURIComponent(document.id)}${profileParam}`} aria-label={`Download ${document.filename}`}><Icon name="download" /></a><button className="icon-action danger" onClick={() => void remove(document)} aria-label={`Delete ${document.filename}`}><Icon name="trash" /></button></article>)}</div> : <EmptyState icon="file" title={`No documents saved for ${person.isSelf ? "you" : person.name} yet`} copy="Pick a document type above, then choose a file. A passport photo page or the latest USCIS notice is a good place to start." />}
     <section className="security-strip"><Icon name="shield" /><div><strong>Use the minimum data needed.</strong><p>Do not upload Social Security cards, payment cards, or unrelated financial records. You can download or permanently delete each file.</p></div></section>
   </div>;
 }
@@ -546,11 +577,11 @@ function CasesView({ profileId, person, cases, onChanged, notify }: { profileId?
     catch (error) { notify(error instanceof Error ? error.message : "Unable to remove case.", "error"); }
   };
 
-  return <div className="page"><section className="page-intro"><div><p className="eyebrow">CASE WORKSPACE</p><h1>{person.possessiveCap} USCIS receipts</h1><p>Keep each filing separate and open the official status tool with the correct receipt number.</p></div></section><form className="case-form" onSubmit={submit}><div><label>Receipt number</label><input value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value.toUpperCase())} placeholder="IOE1234567890" maxLength={15} required /><small>3 letters + 10 digits</small></div><div><label>Form</label><input value={formType} onChange={(event) => setFormType(event.target.value)} placeholder="I-765" /></div><div><label>Label</label><input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="My OPT EAD" /></div><button className="primary" disabled={saving}><Icon name="plus" /> {saving ? "Saving…" : "Add case"}</button></form>
+  return <div className="page"><section className="page-intro"><div><p className="eyebrow">Cases</p><h1>{person.possessiveCap} USCIS receipts</h1><p>Save the receipt number from each USCIS notice, then open the official USCIS status page for it in one tap.</p></div></section><form className="case-form" onSubmit={submit}><div><label htmlFor="case-receipt">Receipt number</label><input id="case-receipt" aria-describedby="case-receipt-hint" value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value.toUpperCase())} placeholder="IOE1234567890" maxLength={15} required /><small id="case-receipt-hint">3 letters + 10 digits, printed as “Receipt Number” near the top of the notice</small></div><div><label htmlFor="case-form-type">Form <em>(optional)</em></label><input id="case-form-type" aria-describedby="case-form-hint" value={formType} onChange={(event) => setFormType(event.target.value)} placeholder="I-765" /><small id="case-form-hint">Shown on the notice, e.g. I-765</small></div><div><label htmlFor="case-nickname">Nickname <em>(optional)</em></label><input id="case-nickname" value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="Work permit renewal" /><small>Only you see this</small></div><button className="primary" disabled={saving}><Icon name="plus" /> {saving ? "Saving…" : "Save receipt"}</button></form>
 
-    <div className="case-list">{cases.map((item) => <article className="case-card" key={item.id}><div className="case-form-badge">{item.formType || "CASE"}</div><div><span>{item.nickname || "USCIS filing"}</span><h2>{item.receiptNumber}</h2><p>Saved {formatDateTime(item.createdAt)} · Check updates on the official USCIS website</p></div><a className="secondary" href={`https://egov.uscis.gov/casestatus/mycasestatus.do?appReceiptNum=${encodeURIComponent(item.receiptNumber)}`} target="_blank" rel="noreferrer">Open official status <Icon name="external" /></a><button className="icon-action danger" onClick={() => void remove(item.id)} aria-label="Remove case"><Icon name="trash" /></button></article>)}</div>
-    {!cases.length && <EmptyState icon="case" title="No receipts yet" copy="Add an actual USCIS receipt number above. It will persist across sessions." />}
-    <section className="info-strip"><Icon name="info" /><div><strong>What works now</strong><p>Save your receipts here and open USCIS to check each case. Status updates are not fetched automatically.</p></div></section>
+    <div className="case-list">{cases.map((item) => <article className="case-card" key={item.id}><div className="case-form-badge">{item.formType || <Icon name="case" />}</div><div><span>{item.nickname || (item.formType ? `Form ${item.formType}` : "USCIS filing")}</span><h2>{item.receiptNumber}</h2><p>Saved {formatDateTime(item.createdAt)}</p></div><a className="secondary" href={`https://egov.uscis.gov/casestatus/mycasestatus.do?appReceiptNum=${encodeURIComponent(item.receiptNumber)}`} target="_blank" rel="noreferrer">Open official status <Icon name="external" /></a><button className="icon-action danger" onClick={() => void remove(item.id)} aria-label={`Remove receipt ${item.receiptNumber}`}><Icon name="trash" /></button></article>)}</div>
+    {!cases.length && <EmptyState icon="case" title={`No receipts saved for ${person.isSelf ? "you" : person.name} yet`} copy="When USCIS accepts a filing, it mails a receipt notice (Form I-797C). Enter its receipt number above to keep it here." />}
+    <section className="info-strip"><Icon name="info" /><div><strong>Status is checked on the USCIS website</strong><p>Immigrant OS doesn’t fetch case status automatically. Use “Open official status” to see the latest update.</p></div></section>
   </div>;
 }
 
@@ -573,7 +604,7 @@ function AssistantView({ profileId, person, plan }: { profileId?: string; person
     } finally { setAsking(false); }
   };
 
-  return <div className="page assistant-page"><section className="assistant-intro"><span className="assistant-mark"><Icon name="spark" /></span><p className="eyebrow">CONNECT ASSISTANT</p><h1>Ask about {person.possessive} action plan</h1><p>Quick answers use {person.possessive} saved dates and checklist. This is a simple guide, not an AI chat or a legal eligibility assessment.</p><div className="assistant-status"><span className="coverage-dot" /><b>{plan?.stageLabel}</b><em>{plan?.coverage} module</em></div></section><section className="chat-card"><div className="chat-log" aria-live="polite">{!messages.length ? <div className="suggestion-grid">{suggestions.map((suggestion) => <button onClick={() => void ask(suggestion)} key={suggestion}>{suggestion}<Icon name="arrow" /></button>)}</div> : messages.map((message, index) => <div className={`message ${message.role}`} key={`${message.role}-${index}`}><span>{message.role === "assistant" ? <Icon name="spark" /> : "You"}</span><div><p>{message.text}</p>{message.sources?.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label} <Icon name="external" /></a>)}{message.limitations && <small>{message.limitations}</small>}</div></div>)}</div><form className="composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}><input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about your status, dates, or missing information…" aria-label="Ask ImmigrantOS" /><button disabled={asking || !question.trim()} aria-label="Send question">{asking ? <span className="spinner" /> : <Icon name="send" />}</button></form></section><AgentConnect /></div>;
+  return <div className="page assistant-page"><section className="assistant-intro"><span className="assistant-mark"><Icon name="spark" /></span><p className="eyebrow">Assistant</p><h1>Ask about {person.possessive} action plan</h1><p>Quick answers use {person.possessive} saved dates and checklist. This is a simple guide, not an AI chat or a legal eligibility assessment.</p>{plan?.stageLabel && <div className="assistant-status"><span className="coverage-dot" /><b>{plan.stageLabel}</b><em>Beta</em></div>}</section><section className="chat-card"><div className="chat-log" aria-live="polite">{!messages.length ? <div className="suggestion-grid">{suggestions.map((suggestion) => <button onClick={() => void ask(suggestion)} key={suggestion}>{suggestion}<Icon name="arrow" /></button>)}</div> : messages.map((message, index) => <div className={`message ${message.role}`} key={`${message.role}-${index}`}><span>{message.role === "assistant" ? <Icon name="spark" /> : "You"}</span><div><p>{message.text}</p>{message.sources?.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label} <Icon name="external" /></a>)}{message.limitations && <small>{message.limitations}</small>}</div></div>)}</div><form className="composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}><input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about dates, next steps, or missing information…" aria-label="Ask ImmigrantOS" /><button disabled={asking || !question.trim()} aria-label="Send question">{asking ? <span className="spinner" /> : <Icon name="send" />}</button></form></section><AgentConnect /></div>;
 }
 
 function Onboarding({ mode = "initial", onCancel, onSaved }: { mode?: "initial" | "add"; onCancel?: () => void; onSaved: (createdProfileId?: string) => void }) {
@@ -595,7 +626,7 @@ function Onboarding({ mode = "initial", onCancel, onSaved }: { mode?: "initial" 
     }
   };
 
-  return <main className="onboarding-shell"><header><Brand /><span>Private beta · General information only</span>{onCancel && <button type="button" className="secondary" onClick={onCancel}>Cancel</button>}</header><div className="onboarding-grid"><section className="onboarding-copy"><p className="eyebrow">YOUR DATES, IN ONE PLACE</p><h1>{mode === "add" ? "Add a family profile." : "Know what matters next."}</h1><p>Start with the dates you know. Save a personal checklist, track your receipts, and export dates to your calendar. Document upload is optional; you can add more details later.</p><div className="trust-list"><div><Icon name="plan" /><span><strong>Your saved dates</strong><small>Review the inputs and official guidance.</small></span></div><div><Icon name="shield" /><span><strong>A simple checklist</strong><small>Mark tasks done and pick up where you left off.</small></span></div><div><Icon name="spark" /><span><strong>Start small</strong><small>Choose your current stage; add details later.</small></span></div></div></section><form className="onboarding-card" onSubmit={save}><div className="step-label"><span>1</span><div><small>START HERE</small><strong>{mode === "add" ? "Which stage is this profile in?" : "Where are you now?"}</strong></div></div><div className="stage-grid">{STAGES.map((stage) => <button type="button" className={draft.lifecycleStage === stage.id ? "selected" : ""} onClick={() => stage.id !== draft.lifecycleStage && setDraft({ ...draft, lifecycleStage: stage.id, statusSubtype: stageDefaults(stage.id, draft.displayName).statusSubtype, admissionBasis: stageDefaults(stage.id, draft.displayName).admissionBasis })} key={stage.id}><span><b>{stage.label}</b><small>{stage.short}</small></span><em>{stage.coverage}</em></button>)}</div><div className="step-label second"><span>2</span><div><small>MINIMUM INPUTS</small><strong>Build your first timeline</strong></div></div><ProfileFields draft={draft} setDraft={setDraft} compact />{error && <p className="form-error">{error}</p>}<button className="primary wide" disabled={saving}>{saving ? "Building your plan…" : mode === "add" ? "Create profile & action plan" : "Create my action plan"} <Icon name="arrow" /></button><p className="form-disclaimer">Your entries are saved to your signed-in account. Start without uploading documents. This checklist is not legal advice or an eligibility decision.</p></form></div></main>;
+  return <main className="onboarding-shell"><header><Brand /><span>Private beta · General information only</span>{onCancel && <button type="button" className="secondary" onClick={onCancel}>Cancel</button>}</header><div className="onboarding-grid"><section className="onboarding-copy"><p className="eyebrow">Your dates, in one place</p><h1>{mode === "add" ? "Add a family profile." : "Know what matters next."}</h1><p>Start with the dates you know. Save a personal checklist, track your receipts, and export dates to your calendar. Document upload is optional; you can add more details later.</p><div className="trust-list"><div><Icon name="plan" /><span><strong>Your saved dates</strong><small>Review the inputs and official guidance.</small></span></div><div><Icon name="shield" /><span><strong>A simple checklist</strong><small>Mark tasks done and pick up where you left off.</small></span></div><div><Icon name="spark" /><span><strong>Start small</strong><small>Choose your current stage; add details later.</small></span></div></div></section><form className="onboarding-card" onSubmit={save}><div className="step-label"><span>1</span><div><small>Step 1</small><strong>{mode === "add" ? "Where is this family member now?" : "Where are you now?"}</strong></div></div><div className="stage-grid">{STAGES.map((stage) => <button type="button" className={draft.lifecycleStage === stage.id ? "selected" : ""} onClick={() => stage.id !== draft.lifecycleStage && setDraft({ ...draft, lifecycleStage: stage.id, statusSubtype: stageDefaults(stage.id, draft.displayName).statusSubtype, admissionBasis: stageDefaults(stage.id, draft.displayName).admissionBasis })} key={stage.id}><span><b>{stage.label}</b><small>{stage.short}</small></span></button>)}</div><div className="step-label second"><span>2</span><div><small>Step 2</small><strong>Add the dates you know</strong><em className="step-hint">All optional. You can add the rest later.</em></div></div><ProfileFields draft={draft} setDraft={setDraft} nameLabel={mode === "add" ? "Their name" : "Your name"} namePlaceholder={mode === "add" ? "e.g. Mia, or “my spouse”" : "Name or nickname (optional)"} compact />{error && <p className="form-error">{error}</p>}<button className="primary wide" disabled={saving}>{saving ? "Building your plan…" : mode === "add" ? "Add family member" : "Create my action plan"} <Icon name="arrow" /></button><p className="form-disclaimer">Your entries are saved to your signed-in account. Start without uploading documents. This checklist is not legal advice or an eligibility decision.</p></form></div></main>;
 }
 
 function ProfileDialog({ profile, canDelete, onDelete, onClose, onSaved }: { profile: ImmigrationProfile; canDelete?: boolean; onDelete?: () => Promise<void>; onClose: () => void; onSaved: () => Promise<void> }) {
@@ -607,24 +638,54 @@ function ProfileDialog({ profile, canDelete, onDelete, onClose, onSaved }: { pro
     try { await api("/api/profile", { method: "PUT", body: JSON.stringify({ ...draft, profileId: profile.id }) }); await onSaved(); }
     catch (err) { setError(err instanceof Error ? err.message : "Unable to save profile."); setSaving(false); }
   };
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="profile-dialog" onSubmit={save} role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="dialog-head"><div><p className="eyebrow">CONFIRMED INPUTS</p><h2 id="profile-title">Immigration profile</h2></div><button type="button" className="icon-action" onClick={onClose} aria-label="Close"><Icon name="close" /></button></div><div className="stage-tabs">{STAGES.map((stage) => <button type="button" className={draft.lifecycleStage === stage.id ? "active" : ""} onClick={() => stage.id !== draft.lifecycleStage && setDraft({ ...draft, lifecycleStage: stage.id, statusSubtype: stageDefaults(stage.id, draft.displayName).statusSubtype, admissionBasis: stageDefaults(stage.id, draft.displayName).admissionBasis })} key={stage.id}>{stage.label}<small>{stage.coverage}</small></button>)}</div><ProfileFields draft={draft} setDraft={setDraft} />{error && <p className="form-error">{error}</p>}<div className="dialog-actions">{canDelete && onDelete && <button type="button" className="secondary danger-text" onClick={() => void onDelete()} disabled={saving}>Delete profile</button>}<button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={saving}>{saving ? "Saving…" : "Save & recalculate"}</button></div></form></div>;
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="profile-dialog" onSubmit={save} role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="dialog-head"><div><p className="eyebrow">Edit details</p><h2 id="profile-title">{profile.displayName.trim() ? `${profile.displayName.trim()}’s details` : profile.isPrimary ? "Your details" : "Profile details"}</h2><p className="dialog-sub">Change the stage or dates. The action plan updates when you save.</p></div><button type="button" className="icon-action" onClick={onClose} aria-label="Close"><Icon name="close" /></button></div><div className="stage-tabs">{STAGES.map((stage) => <button type="button" className={draft.lifecycleStage === stage.id ? "active" : ""} onClick={() => stage.id !== draft.lifecycleStage && setDraft({ ...draft, lifecycleStage: stage.id, statusSubtype: stageDefaults(stage.id, draft.displayName).statusSubtype, admissionBasis: stageDefaults(stage.id, draft.displayName).admissionBasis })} key={stage.id} aria-pressed={draft.lifecycleStage === stage.id}>{stage.label}<small>{stage.short}</small></button>)}</div><ProfileFields draft={draft} setDraft={setDraft} nameLabel={profile.isPrimary ? "Your name" : "Name"} />{error && <p className="form-error">{error}</p>}<div className="dialog-actions">{canDelete && onDelete && <button type="button" className="secondary danger-text" onClick={() => void onDelete()} disabled={saving}>Delete profile</button>}<button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={saving}>{saving ? "Saving…" : "Save and update plan"}</button></div></form></div>;
 }
 
-function ProfileFields({ draft, setDraft, compact = false }: { draft: ImmigrationProfile; setDraft: (profile: ImmigrationProfile) => void; compact?: boolean }) {
+// Where-to-find hints describe where a date is printed. They are not advice about what the date means.
+const HINTS = {
+  name: "Only used to label this profile.",
+  f1Stage: "Student while in classes; OPT or STEM OPT once working on a work permit (EAD).",
+  admission: "Look up your I-94 at i94.cbp.dhs.gov. “D/S” in the Admit Until field means duration of status.",
+  programEnd: "“Program End Date” on page 1 of your Form I-20.",
+  i94: "“Admit Until Date” on your most recent I-94 record (i94.cbp.dhs.gov).",
+  ead: "“Card Expires” on the front of your work permit (EAD card).",
+  visa: "“Expiration Date” on the visa in your passport.",
+  h1bStatus: "H-1B if you hold the job; H-4 if you are the spouse or child of an H-1B worker.",
+  gcStep: "The most recent step filed in your green card case.",
+  priority: "“Priority Date” on your I-140 receipt or approval notice (Form I-797).",
+  residentSince: "“Resident Since” on the front of your Green Card.",
+  gcExpires: "“Card Expires” on the front of your Green Card.",
+  passport: "“Date of expiration” on your passport’s photo page.",
+};
+
+function ProfileFields({ draft, setDraft, nameLabel, namePlaceholder = "Name or nickname (optional)", compact = false }: { draft: ImmigrationProfile; setDraft: (profile: ImmigrationProfile) => void; nameLabel: string; namePlaceholder?: string; compact?: boolean }) {
   const field = (key: keyof ImmigrationProfile, value: string | null) => setDraft({ ...draft, [key]: value });
-  return <div className={`profile-fields ${compact ? "compact" : ""}`}><label className="span-2"><span>Your name</span><input value={draft.displayName} onChange={(event) => field("displayName", event.target.value)} placeholder="Name or nickname (optional)" /></label>
-    {draft.lifecycleStage === "F1" && <><label><span>Current F-1 stage</span><select value={draft.statusSubtype} onChange={(event) => field("statusSubtype", event.target.value)}><option value="STUDENT">Student</option><option value="OPT">Post-completion OPT</option><option value="STEM_OPT">STEM OPT</option></select></label><label><span>I-94 admission</span><select value={draft.admissionBasis} onChange={(event) => field("admissionBasis", event.target.value)}><option value="DS_TRANSITION">D/S (duration of status)</option><option value="FIXED_DATE">Fixed admit-until date</option></select></label><DateField label="I-20 program end" value={draft.programEndDate} onChange={(value) => field("programEndDate", value)} />{draft.admissionBasis === "FIXED_DATE" && <DateField label="I-94 admit-until" value={draft.i94ExpirationDate} onChange={(value) => field("i94ExpirationDate", value)} />}{draft.statusSubtype !== "STUDENT" && <DateField label="Current EAD expires" value={draft.eadEndDate} onChange={(value) => field("eadEndDate", value)} />}</>}
-    {draft.lifecycleStage === "H1B" && <><label><span>Status</span><select value={draft.statusSubtype} onChange={(event) => field("statusSubtype", event.target.value)}><option value="H1B">H-1B</option><option value="H4">H-4</option></select></label><DateField label="I-94 admit-until" value={draft.i94ExpirationDate} onChange={(value) => field("i94ExpirationDate", value)} /><DateField label="Visa stamp expires" value={draft.visaExpirationDate} onChange={(value) => field("visaExpirationDate", value)} /></>}
-    {draft.lifecycleStage === "VISITOR" && <><DateField label="I-94 admit-until" value={draft.i94ExpirationDate} onChange={(value) => field("i94ExpirationDate", value)} /><DateField label="Visa stamp expires" value={draft.visaExpirationDate} onChange={(value) => field("visaExpirationDate", value)} /></>}
-    {draft.lifecycleStage === "GREEN_CARD" && <><label><span>Current step</span><select value={draft.statusSubtype} onChange={(event) => field("statusSubtype", event.target.value)}><option value="PERM">PERM</option><option value="I140">I-140</option><option value="I485">I-485 / adjustment</option><option value="CONSULAR">Consular processing</option></select></label><DateField label="Priority date" value={draft.priorityDate} onChange={(value) => field("priorityDate", value)} /></>}
-    {(draft.lifecycleStage === "LPR" || draft.lifecycleStage === "CITIZENSHIP") && <><DateField label="Resident since" value={draft.greenCardSince} onChange={(value) => field("greenCardSince", value)} />{draft.lifecycleStage === "LPR" && <DateField label="Green Card expires" value={draft.greenCardExpirationDate} onChange={(value) => field("greenCardExpirationDate", value)} />}<label><span>Naturalization basis</span><select aria-describedby="naturalization-basis-hint" value={draft.naturalizationBasis} onChange={(event) => field("naturalizationBasis", event.target.value)}><option value="five_year">General 5-year rule</option><option value="three_year">3-year spouse rule</option></select><small id="naturalization-basis-hint">Conditions apply; this selection does not determine eligibility. Review <a href="https://www.uscis.gov/n-400" target="_blank" rel="noreferrer">USCIS Form N-400 requirements</a>.</small></label></>}
-    {draft.lifecycleStage !== "F1" && draft.lifecycleStage !== "VISITOR" && <DateField label="EAD expires (if applicable)" value={draft.eadEndDate} onChange={(value) => field("eadEndDate", value)} />}
-    <DateField label="Passport expires" value={draft.passportExpirationDate} onChange={(value) => field("passportExpirationDate", value)} />
+  const statusSelect = (label: string, hint: string) => <SelectField label={label} hint={hint} value={draft.statusSubtype} onChange={(value) => field("statusSubtype", value)} options={(STATUS_OPTIONS[draft.lifecycleStage] ?? []).map((code): [string, string] => [code, statusLabel(code)])} />;
+  return <div className={`profile-fields ${compact ? "compact" : ""}`}>
+    <TextField className="span-2" label={nameLabel} hint={HINTS.name} value={draft.displayName} placeholder={namePlaceholder} onChange={(value) => field("displayName", value)} />
+    {draft.lifecycleStage === "F1" && <>{statusSelect("Current F-1 stage", HINTS.f1Stage)}<SelectField label="What your I-94 shows" hint={HINTS.admission} value={draft.admissionBasis} onChange={(value) => field("admissionBasis", value)} options={[["DS_TRANSITION", "“D/S” (no end date)"], ["FIXED_DATE", "A specific end date"]]} /><DateField label="I-20 program end date" hint={HINTS.programEnd} value={draft.programEndDate} onChange={(value) => field("programEndDate", value)} />{draft.admissionBasis === "FIXED_DATE" && <DateField label="I-94 admit-until date" hint={HINTS.i94} value={draft.i94ExpirationDate} onChange={(value) => field("i94ExpirationDate", value)} />}{draft.statusSubtype !== "STUDENT" && <DateField label="Work permit (EAD) expires" hint={HINTS.ead} value={draft.eadEndDate} onChange={(value) => field("eadEndDate", value)} />}</>}
+    {draft.lifecycleStage === "H1B" && <>{statusSelect("Status", HINTS.h1bStatus)}<DateField label="I-94 admit-until date" hint={HINTS.i94} value={draft.i94ExpirationDate} onChange={(value) => field("i94ExpirationDate", value)} /><DateField label="Visa expires" hint={HINTS.visa} value={draft.visaExpirationDate} onChange={(value) => field("visaExpirationDate", value)} /></>}
+    {draft.lifecycleStage === "VISITOR" && <><DateField label="I-94 admit-until date" hint={HINTS.i94} value={draft.i94ExpirationDate} onChange={(value) => field("i94ExpirationDate", value)} /><DateField label="Visa expires" hint={HINTS.visa} value={draft.visaExpirationDate} onChange={(value) => field("visaExpirationDate", value)} /></>}
+    {draft.lifecycleStage === "GREEN_CARD" && <>{statusSelect("Current step", HINTS.gcStep)}<DateField label="Priority date" hint={HINTS.priority} value={draft.priorityDate} onChange={(value) => field("priorityDate", value)} /></>}
+    {(draft.lifecycleStage === "LPR" || draft.lifecycleStage === "CITIZENSHIP") && <><DateField label="Resident since" hint={HINTS.residentSince} value={draft.greenCardSince} onChange={(value) => field("greenCardSince", value)} />{draft.lifecycleStage === "LPR" && <DateField label="Green Card expires" hint={HINTS.gcExpires} value={draft.greenCardExpirationDate} onChange={(value) => field("greenCardExpirationDate", value)} />}<label className="field"><span>Naturalization rule to review</span><select aria-describedby="naturalization-basis-hint" value={draft.naturalizationBasis} onChange={(event) => field("naturalizationBasis", event.target.value)}><option value="five_year">General 5-year rule</option><option value="three_year">3-year rule for spouses of U.S. citizens</option></select><small id="naturalization-basis-hint">Conditions apply; this selection does not determine eligibility. Review <a href="https://www.uscis.gov/n-400" target="_blank" rel="noreferrer">USCIS Form N-400 requirements</a>.</small></label></>}
+    {draft.lifecycleStage !== "F1" && draft.lifecycleStage !== "VISITOR" && <DateField label="Work permit (EAD) expires, if you have one" hint={HINTS.ead} value={draft.eadEndDate} onChange={(value) => field("eadEndDate", value)} />}
+    <DateField label="Passport expires" hint={HINTS.passport} value={draft.passportExpirationDate} onChange={(value) => field("passportExpirationDate", value)} />
   </div>;
 }
 
-function DateField({ label, value, onChange, required = false }: { label: string; value: string | null; onChange: (value: string | null) => void; required?: boolean }) {
-  return <label><span>{label}</span><input type="date" value={value ?? ""} onInput={(event) => onChange(event.currentTarget.value || null)} required={required} /></label>;
+function TextField({ label, hint, value, placeholder, onChange, className }: { label: string; hint: string; value: string; placeholder?: string; onChange: (value: string) => void; className?: string }) {
+  const id = useId();
+  return <label className={`field ${className ?? ""}`}><span>{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} aria-describedby={`${id}-hint`} /><small id={`${id}-hint`}>{hint}</small></label>;
+}
+
+function SelectField({ label, hint, value, options, onChange }: { label: string; hint: string; value: string; options: [string, string][]; onChange: (value: string) => void }) {
+  const id = useId();
+  return <label className="field"><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)} aria-describedby={`${id}-hint`}>{options.map(([code, text]) => <option key={code} value={code}>{text}</option>)}</select><small id={`${id}-hint`}>{hint}</small></label>;
+}
+
+function DateField({ label, hint, value, onChange, required = false }: { label: string; hint: string; value: string | null; onChange: (value: string | null) => void; required?: boolean }) {
+  const id = useId();
+  return <label className="field"><span>{label}</span><input type="date" value={value ?? ""} onInput={(event) => onChange(event.currentTarget.value || null)} required={required} aria-describedby={`${id}-hint`} /><small id={`${id}-hint`}>{hint}</small></label>;
 }
 
 function EmptyState({ icon, title, copy }: { icon: string; title: string; copy: string }) { return <div className="empty-state"><span><Icon name={icon} /></span><h2>{title}</h2><p>{copy}</p></div>; }
@@ -679,7 +740,23 @@ function initials(name: string) { return name.trim().split(/\s+/).slice(0, 2).ma
 function month(value: string) { return new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" }).format(new Date(`${value}T12:00:00Z`)).toUpperCase(); }
 function day(value: string) { return new Date(`${value}T12:00:00Z`).getUTCDate(); }
 function year(value: string) { return new Date(`${value}T12:00:00Z`).getUTCFullYear(); }
-function labelConfidence(value: PlanItem["confidence"]) { return value === "needs-review" ? "Needs review" : value === "preliminary" ? "Preliminary" : "Review source"; }
+type Timing = { label: string; tone: "past" | "soon" | "upcoming" | "later" | "ongoing" | "done" };
+function timing(item: Pick<PlanItem, "dueDate" | "completed">): Timing {
+  if (item.completed) return { label: "Done", tone: "done" };
+  if (!item.dueDate) return { label: "Ongoing", tone: "ongoing" };
+  const days = Math.round((Date.parse(`${item.dueDate}T12:00:00Z`) - Date.parse(`${localToday()}T12:00:00Z`)) / 86_400_000);
+  if (days === 0) return { label: "Today", tone: "soon" };
+  if (days === 1) return { label: "Tomorrow", tone: "soon" };
+  if (days < 0) return { label: `Passed ${distance(-days)} ago · check this`, tone: "past" };
+  return { label: `In ${distance(days)}`, tone: days <= 30 ? "soon" : days <= 90 ? "upcoming" : "later" };
+}
+function distance(days: number) {
+  if (days < 60) return `${days} day${days === 1 ? "" : "s"}`;
+  if (days < 730) return `${Math.round(days / 30.44)} months`;
+  return `${Math.round(days / 365.25)} years`;
+}
+const DOCUMENT_KINDS: Record<string, string> = { Visa: "Visa (in passport)", "I-94": "I-94 arrival record", EAD: "Work permit (EAD card)", "USCIS notice": "USCIS notice (I-797)" };
+function documentKindLabel(kind: string) { return DOCUMENT_KINDS[kind] ?? kind; }
 function formatBytes(bytes: number) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 function formatDateTime(value: string) { const date = new Date(value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`); return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date); }
 

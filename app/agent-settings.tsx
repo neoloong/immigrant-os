@@ -48,7 +48,7 @@ export default function AgentConnect() {
     finally { setBusy(false); }
   }
   return <section className="section-block agent-settings" aria-labelledby="connect-agent-title">
-    <div className="section-heading"><div><p className="eyebrow">YOUR OWN AI ASSISTANT</p><h2 id="connect-agent-title">Connect your own AI assistant</h2></div></div>
+    <div className="section-heading"><div><p className="eyebrow">Your own AI assistant</p><h2 id="connect-agent-title">Connect your own AI assistant</h2></div></div>
     <p><a href="/agents">Use with your AI agent: connection guide and starter prompt →</a></p>
     <p>A connected assistant can see every profile in this account. Start with Read only. Read + write also allows date/status corrections and adding receipts. Tokens expire after 90 days. Revoke access here whenever you need to.</p>
     {message && <p role="status" className="agent-notice">{message}</p>}
