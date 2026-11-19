@@ -39,7 +39,7 @@ const STAGES: { id: LifecycleStage; label: string; short: string }[] = [
 const NAV: { id: View; label: string; short: string; icon: string }[] = [
   { id: "plan", label: "Action plan", short: "Plan", icon: "plan" },
   { id: "profiles", label: "Profiles", short: "Profiles", icon: "users" },
-  { id: "documents", label: "Documents", short: "Documents", icon: "file" },
+  { id: "documents", label: "Documents", short: "Docs", icon: "file" },
   { id: "cases", label: "Cases", short: "Cases", icon: "case" },
   { id: "assistant", label: "Connect assistant", short: "Assistant", icon: "spark" },
   { id: "settings", label: "Settings", short: "Settings", icon: "gear" },
@@ -510,22 +510,37 @@ function ProfilesView({ profiles, activeProfileId, person, switchingTo, onSelect
 
 function DocumentsView({ profileId, person, documents, onChanged, notify }: { profileId?: string; person: Person; documents: SavedDocument[]; onChanged: () => Promise<void>; notify: Notify }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [kind, setKind] = useState("Passport");
+  const typeRef = useRef<HTMLSelectElement>(null);
+  // The file is picked first; the type is chosen afterwards on a pending card, so the user
+  // sees which file they are labelling. Upload still happens in one POST with both values.
+  const [pending, setPending] = useState<File | null>(null);
+  const [kind, setKind] = useState("");
   const [uploading, setUploading] = useState(false);
   const profileParam = profileId ? `&profileId=${encodeURIComponent(profileId)}` : "";
 
-  const upload = async (file?: File) => {
+  const pick = (file?: File) => {
+    if (fileRef.current) fileRef.current.value = "";
     if (!file) return;
+    setPending(file);
+    setKind(guessDocumentKind(file.name));
+    window.setTimeout(() => typeRef.current?.focus(), 0);
+  };
+  const cancel = () => { setPending(null); setKind(""); };
+
+  const upload = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!pending || !kind) return;
     setUploading(true);
     try {
       const form = new FormData();
-      form.set("file", file);
+      form.set("file", pending);
       form.set("kind", kind);
       if (profileId) form.set("profileId", profileId);
       await api("/api/documents", { method: "POST", body: form });
-      if (fileRef.current) fileRef.current.value = "";
+      const name = pending.name;
+      cancel();
       await onChanged();
-      notify(`${file.name} saved to ${person.possessive} documents.`);
+      notify(`${name} saved to ${person.possessive} documents.`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Upload failed.", "error");
     } finally {
@@ -534,22 +549,39 @@ function DocumentsView({ profileId, person, documents, onChanged, notify }: { pr
   };
 
   const remove = async (document: SavedDocument) => {
-    if (!window.confirm(`Delete ${document.filename}? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${document.filename} — ${documentKindLabel(document.kind)}? This cannot be undone.`)) return;
     try {
       await api(`/api/documents?id=${encodeURIComponent(document.id)}${profileParam}`, { method: "DELETE" });
       await onChanged();
-      notify("Document deleted.");
+      notify(`${document.filename} deleted.`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Delete failed.", "error");
     }
   };
 
-  return <div className="page"><section className="page-intro"><div><p className="eyebrow">Documents</p><h1>{person.possessiveCap} documents</h1><p>Files are private to your signed-in account. Only you can download or delete them.</p></div></section><section className="upload-panel"><div className="upload-mark"><Icon name="upload" /></div><div><h2>Add a document</h2><p>Choose the document type, then pick a PDF, JPEG, or PNG (up to 10 MB). Dates are not read from files, so also enter them in Edit details.</p></div><label><span>Document type</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option>Passport</option><option value="Visa">Visa (in passport)</option><option value="Form I-20">Form I-20</option><option value="I-94">I-94 arrival record</option><option value="EAD">Work permit (EAD card)</option><option value="USCIS notice">USCIS notice (I-797)</option><option value="Green Card">Green Card</option><option>Other</option></select></label><input ref={fileRef} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => void upload(event.target.files?.[0])} /><button className="primary" disabled={uploading} onClick={() => fileRef.current?.click()}><Icon name="upload" /> {uploading ? "Uploading…" : "Choose file"}</button></section>
+  const picker = <input ref={fileRef} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" tabIndex={-1} aria-hidden="true" onChange={(event) => pick(event.target.files?.[0])} />;
+
+  return <div className="page"><section className="page-intro"><div><p className="eyebrow">Documents</p><h1>{person.possessiveCap} documents</h1><p>Files are private to your signed-in account. Only you can download or delete them.</p></div></section>
+    {pending
+      ? <form className="upload-panel pending" onSubmit={(event) => void upload(event)} aria-labelledby="pending-title">
+          <FileBadge mimeType={pending.type} filename={pending.name} />
+          <div className="pending-file"><h2 id="pending-title">What is this document?</h2><p><b>{pending.name}</b> · {formatBytes(pending.size)}</p></div>
+          <label><span>Document type</span><select ref={typeRef} value={kind} required onChange={(event) => setKind(event.target.value)}><option value="" disabled>Choose a type…</option>{DOCUMENT_KIND_OPTIONS.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>
+          <div className="pending-actions"><button type="button" className="secondary" disabled={uploading} onClick={cancel}>Cancel</button><button type="button" className="secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>Pick another file</button><button className="primary" disabled={uploading || !kind}><Icon name="upload" /> {uploading ? "Saving…" : "Save document"}</button></div>
+          {picker}
+        </form>
+      : <section className="upload-panel"><div className="upload-mark"><Icon name="upload" /></div><div><h2>Add a document</h2><p>Pick a PDF, JPEG, or PNG (up to 10 MB), then say what it is. Dates are not read from files, so also enter them in Edit details.</p></div>{picker}<button className="primary" onClick={() => fileRef.current?.click()}><Icon name="upload" /> Choose file</button></section>}
 
     <div className="section-heading document-heading"><div><h2>{documents.length ? `${documents.length} saved document${documents.length === 1 ? "" : "s"}` : "Saved documents"}</h2></div></div>
-    {documents.length ? <div className="document-list">{documents.map((document) => <article className="document-row" key={document.id}><span className="document-icon"><Icon name="file" /></span><div><span className="tag neutral">{documentKindLabel(document.kind)}</span><h3>{document.filename}</h3><p>{formatBytes(document.sizeBytes)} · Uploaded {formatDateTime(document.uploadedAt)}</p></div><a className="icon-action" href={`/api/documents?download=${encodeURIComponent(document.id)}${profileParam}`} aria-label={`Download ${document.filename}`}><Icon name="download" /></a><button className="icon-action danger" onClick={() => void remove(document)} aria-label={`Delete ${document.filename}`}><Icon name="trash" /></button></article>)}</div> : <EmptyState icon="file" title={`No documents saved for ${person.isSelf ? "you" : person.name} yet`} copy="Pick a document type above, then choose a file. A passport photo page or the latest USCIS notice is a good place to start." />}
+    {documents.length ? <div className="document-list">{documents.map((document) => <article className="document-row" key={document.id}><FileBadge mimeType={document.mimeType} filename={document.filename} /><div><h3>{documentKindLabel(document.kind)}</h3><p className="document-name" title={document.filename}>{document.filename}</p><p>{formatBytes(document.sizeBytes)} · Uploaded {formatDateTime(document.uploadedAt)}</p></div><a className="icon-action" href={`/api/documents?download=${encodeURIComponent(document.id)}${profileParam}`} aria-label={`Download ${document.filename}`}><Icon name="download" /></a><button className="icon-action danger" onClick={() => void remove(document)} aria-label={`Delete ${document.filename}`}><Icon name="trash" /></button></article>)}</div> : <EmptyState icon="file" title={`No documents saved for ${person.isSelf ? "you" : person.name} yet`} copy="Choose a file above, then say what it is. A passport photo page or the latest USCIS notice is a good place to start." />}
     <section className="security-strip"><Icon name="shield" /><div><strong>Use the minimum data needed.</strong><p>Do not upload Social Security cards, payment cards, or unrelated financial records. You can download or permanently delete each file.</p></div></section>
   </div>;
+}
+
+// File-format badge (PDF / JPG / PNG) so rows with the same document type are still distinguishable.
+function FileBadge({ mimeType, filename }: { mimeType: string; filename: string }) {
+  const ext = mimeType === "application/pdf" ? "PDF" : mimeType === "image/png" ? "PNG" : mimeType === "image/jpeg" ? "JPG" : (filename.split(".").pop() ?? "").slice(0, 4).toUpperCase() || "FILE";
+  return <span className={`document-icon ${ext === "PDF" ? "pdf" : "image"}`} aria-hidden="true"><Icon name={ext === "PDF" ? "file" : "image"} size={18} /><small>{ext}</small></span>;
 }
 
 function CasesView({ profileId, person, cases, onChanged, notify }: { profileId?: string; person: Person; cases: TrackedCase[]; onChanged: () => Promise<void>; notify: Notify }) {
@@ -572,14 +604,16 @@ function CasesView({ profileId, person, cases, onChanged, notify }: { profileId?
     } finally { setSaving(false); }
   };
 
-  const remove = async (id: string) => {
-    try { await api(`/api/cases?id=${encodeURIComponent(id)}${profileParam}`, { method: "DELETE" }); await onChanged(); notify("Case removed."); }
+  const remove = async (item: TrackedCase) => {
+    const label = item.nickname ? `“${item.nickname}” (${item.receiptNumber})` : item.receiptNumber;
+    if (!window.confirm(`Remove receipt ${label} from ${person.possessive} cases? This only removes it from Immigrant OS; nothing changes at USCIS.`)) return;
+    try { await api(`/api/cases?id=${encodeURIComponent(item.id)}${profileParam}`, { method: "DELETE" }); await onChanged(); notify(`Receipt ${item.receiptNumber} removed.`); }
     catch (error) { notify(error instanceof Error ? error.message : "Unable to remove case.", "error"); }
   };
 
   return <div className="page"><section className="page-intro"><div><p className="eyebrow">Cases</p><h1>{person.possessiveCap} USCIS receipts</h1><p>Save the receipt number from each USCIS notice, then open the official USCIS status page for it in one tap.</p></div></section><form className="case-form" onSubmit={submit}><div><label htmlFor="case-receipt">Receipt number</label><input id="case-receipt" aria-describedby="case-receipt-hint" value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value.toUpperCase())} placeholder="IOE1234567890" maxLength={15} required /><small id="case-receipt-hint">3 letters + 10 digits, printed as “Receipt Number” near the top of the notice</small></div><div><label htmlFor="case-form-type">Form <em>(optional)</em></label><input id="case-form-type" aria-describedby="case-form-hint" value={formType} onChange={(event) => setFormType(event.target.value)} placeholder="I-765" /><small id="case-form-hint">Shown on the notice, e.g. I-765</small></div><div><label htmlFor="case-nickname">Nickname <em>(optional)</em></label><input id="case-nickname" value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="Work permit renewal" /><small>Only you see this</small></div><button className="primary" disabled={saving}><Icon name="plus" /> {saving ? "Saving…" : "Save receipt"}</button></form>
 
-    <div className="case-list">{cases.map((item) => <article className="case-card" key={item.id}><div className="case-form-badge">{item.formType || <Icon name="case" />}</div><div><span>{item.nickname || (item.formType ? `Form ${item.formType}` : "USCIS filing")}</span><h2>{item.receiptNumber}</h2><p>Saved {formatDateTime(item.createdAt)}</p></div><a className="secondary" href={`https://egov.uscis.gov/casestatus/mycasestatus.do?appReceiptNum=${encodeURIComponent(item.receiptNumber)}`} target="_blank" rel="noreferrer">Open official status <Icon name="external" /></a><button className="icon-action danger" onClick={() => void remove(item.id)} aria-label={`Remove receipt ${item.receiptNumber}`}><Icon name="trash" /></button></article>)}</div>
+    <div className="case-list">{cases.map((item) => <article className="case-card" key={item.id}><div className="case-form-badge">{item.formType || <Icon name="case" />}</div><div><span>{item.nickname || (item.formType ? `Form ${item.formType}` : "USCIS filing")}</span><h2>{item.receiptNumber}</h2><p>Saved {formatDateTime(item.createdAt)}</p></div><a className="secondary" href={`https://egov.uscis.gov/casestatus/mycasestatus.do?appReceiptNum=${encodeURIComponent(item.receiptNumber)}`} target="_blank" rel="noreferrer">Open official status <Icon name="external" /></a><button className="icon-action danger" onClick={() => void remove(item)} aria-label={`Remove receipt ${item.receiptNumber}`}><Icon name="trash" /></button></article>)}</div>
     {!cases.length && <EmptyState icon="case" title={`No receipts saved for ${person.isSelf ? "you" : person.name} yet`} copy="When USCIS accepts a filing, it mails a receipt notice (Form I-797C). Enter its receipt number above to keep it here." />}
     <section className="info-strip"><Icon name="info" /><div><strong>Status is checked on the USCIS website</strong><p>Immigrant OS doesn’t fetch case status automatically. Use “Open official status” to see the latest update.</p></div></section>
   </div>;
@@ -695,7 +729,7 @@ function Brand({ mobile = false }: { mobile?: boolean }) { return <div className
 
 function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
-    plan: <><path d="M5 4h14v16H5z" /><path d="M8 9h8M8 13h5M8 17h7" /></>, file: <><path d="M6 2h8l4 4v16H6z" /><path d="M14 2v5h5" /></>, case: <><path d="M5 7h14v13H5zM9 7V4h6v3" /><path d="M5 12h14" /></>, spark: <><path d="m12 3 1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5z" /><path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z" /></>, shield: <><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z" /><path d="m9 12 2 2 4-5" /></>, chevron: <path d="m9 18 6-6-6-6" />, edit: <><path d="m4 20 4-.8L19 8.2 15.8 5 4.8 16z" /><path d="m14 6.8 3.2 3.2" /></>, print: <><path d="M7 9V3h10v6M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" /><path d="M7 14h10v7H7z" /></>, alert: <><path d="m12 3 10 18H2z" /><path d="M12 9v5M12 18h.01" /></>, arrow: <path d="m9 18 6-6-6-6" />, external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 13v7H4V6h7" /></>, check: <path d="m5 12 4 4L19 6" />, upload: <><path d="M12 16V4M7 9l5-5 5 5" /><path d="M4 15v5h16v-5" /></>, download: <><path d="M12 4v12M7 11l5 5 5-5" /><path d="M4 20h16" /></>, trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14" /><path d="M10 11v6M14 11v6" /></>, plus: <path d="M12 5v14M5 12h14" />, info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></>, send: <><path d="m3 3 18 9-18 9 4-9z" /><path d="M7 12h14" /></>, close: <path d="m6 6 12 12M18 6 6 18" />, chevronDown: <path d="m6 9 6 6 6-6" />, users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5" /><path d="M15.5 4.8a3.3 3.3 0 0 1 0 6.4M18 14.8c2 .7 3.2 2.4 3.5 5.2" /></>, gear: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>, logout: <><path d="M10 4H5v16h5" /><path d="M14 8l4 4-4 4M18 12H9" /></>,
+    plan: <><path d="M5 4h14v16H5z" /><path d="M8 9h8M8 13h5M8 17h7" /></>, file: <><path d="M6 2h8l4 4v16H6z" /><path d="M14 2v5h5" /></>, case: <><path d="M5 7h14v13H5zM9 7V4h6v3" /><path d="M5 12h14" /></>, spark: <><path d="m12 3 1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5z" /><path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z" /></>, shield: <><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z" /><path d="m9 12 2 2 4-5" /></>, chevron: <path d="m9 18 6-6-6-6" />, edit: <><path d="m4 20 4-.8L19 8.2 15.8 5 4.8 16z" /><path d="m14 6.8 3.2 3.2" /></>, print: <><path d="M7 9V3h10v6M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" /><path d="M7 14h10v7H7z" /></>, alert: <><path d="m12 3 10 18H2z" /><path d="M12 9v5M12 18h.01" /></>, arrow: <path d="m9 18 6-6-6-6" />, external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 13v7H4V6h7" /></>, check: <path d="m5 12 4 4L19 6" />, upload: <><path d="M12 16V4M7 9l5-5 5 5" /><path d="M4 15v5h16v-5" /></>, download: <><path d="M12 4v12M7 11l5 5 5-5" /><path d="M4 20h16" /></>, trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14" /><path d="M10 11v6M14 11v6" /></>, plus: <path d="M12 5v14M5 12h14" />, info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></>, send: <><path d="m3 3 18 9-18 9 4-9z" /><path d="M7 12h14" /></>, close: <path d="m6 6 12 12M18 6 6 18" />, chevronDown: <path d="m6 9 6 6 6-6" />, users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5" /><path d="M15.5 4.8a3.3 3.3 0 0 1 0 6.4M18 14.8c2 .7 3.2 2.4 3.5 5.2" /></>, gear: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>, logout: <><path d="M10 4H5v16h5" /><path d="M14 8l4 4-4 4M18 12H9" /></>, image: <><rect x="4" y="4" width="16" height="16" rx="2" /><circle cx="9.5" cy="9.5" r="1.5" /><path d="m20 15-4.5-4.5L6 20" /></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -755,8 +789,22 @@ function distance(days: number) {
   if (days < 730) return `${Math.round(days / 30.44)} months`;
   return `${Math.round(days / 365.25)} years`;
 }
-const DOCUMENT_KINDS: Record<string, string> = { Visa: "Visa (in passport)", "I-94": "I-94 arrival record", EAD: "Work permit (EAD card)", "USCIS notice": "USCIS notice (I-797)" };
+// Stored `kind` values are unchanged; only the visible labels are friendlier.
+const DOCUMENT_KIND_OPTIONS: [string, string][] = [["Passport", "Passport"], ["Visa", "Visa (in passport)"], ["Form I-20", "Form I-20"], ["I-94", "I-94 arrival record"], ["EAD", "Work permit (EAD card)"], ["USCIS notice", "USCIS notice (I-797)"], ["Green Card", "Green Card"], ["Other", "Other"]];
+const DOCUMENT_KINDS: Record<string, string> = Object.fromEntries(DOCUMENT_KIND_OPTIONS);
 function documentKindLabel(kind: string) { return DOCUMENT_KINDS[kind] ?? kind; }
+// Pre-selects a type from obvious file names ("passport.pdf", "I-797C.png"); the user can change it.
+function guessDocumentKind(filename: string) {
+  const name = filename.toLowerCase().replace(/[\s_.]+/g, "-");
+  if (/passport/.test(name)) return "Passport";
+  if (/(^|-)i-?20(?!\d)/.test(name)) return "Form I-20";
+  if (/(^|-)i-?94(?!\d)/.test(name)) return "I-94";
+  if (/(^|-)ead(-|$)|i-?766|work-?permit/.test(name)) return "EAD";
+  if (/(^|-)i-?797|receipt|approval|notice/.test(name)) return "USCIS notice";
+  if (/green-?card|i-?551|permanent-?resident/.test(name)) return "Green Card";
+  if (/visa/.test(name)) return "Visa";
+  return "";
+}
 function formatBytes(bytes: number) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 function formatDateTime(value: string) { const date = new Date(value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`); return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date); }
 
