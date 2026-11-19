@@ -4,9 +4,12 @@ import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import type { ImmigrationProfile, LifecycleStage } from "../lib/profile";
 import type { PlanItem, PlanResult, Source } from "../lib/rules";
 import AgentConnect from "./agent-settings";
+import Icon from "./icon";
+import ExtensionView from "./extension-view";
+import { buildExtensionTimeline } from "../lib/extension";
 import { calendarFile } from "../lib/calendar";
 
-type View = "plan" | "profiles" | "documents" | "cases" | "assistant" | "settings";
+type View = "plan" | "profiles" | "documents" | "cases" | "assistant" | "settings" | "extension";
 type SavedDocument = { id: string; kind: string; filename: string; mimeType: string; sizeBytes: number; uploadedAt: string };
 type TrackedCase = { id: string; receiptNumber: string; formType: string; nickname: string; statusText: string; lastCheckedAt: string | null; createdAt: string };
 type ChatMessage = { role: "user" | "assistant"; text: string; sources?: Source[]; limitations?: string };
@@ -274,6 +277,7 @@ export default function Home() {
         {view === "documents" && <DocumentsView key={profile.id ?? "primary"} profileId={profile.id} person={person} documents={documents} onChanged={async () => { await refresh(); }} notify={notify} />}
         {view === "cases" && <CasesView key={profile.id ?? "primary"} profileId={profile.id} person={person} cases={cases} onChanged={async () => { await refresh(); }} notify={notify} />}
         {view === "assistant" && <AssistantView key={profile.id ?? "primary"} profileId={profile.id} person={person} plan={plan} />}
+        {view === "extension" && <ExtensionView key={profile.id ?? "primary"} profile={profile} person={person} onBack={() => go("plan")} onEdit={() => setProfileOpen(true)} notify={notify} />}
         {view === "settings" && <SettingsPage profile={profile} person={person} onEdit={() => setProfileOpen(true)} onManageProfiles={() => go("profiles")} />}
       </section>
 
@@ -432,6 +436,8 @@ function PlanView({ profile, person, plan, documents, cases, onEdit, onNavigate,
       : items.length ? <section className="all-done"><Icon name="check" /><h2>All caught up</h2><p>Every action in {whose} plan is marked done. New actions appear when {person.isSelf ? "you update your" : `you update ${person.possessive}`} dates.</p></section>
       : <section className="plan-empty"><span className="plan-empty-icon"><Icon name="plan" /></span><h2>Nothing to schedule yet</h2><p>Add more dates, such as a passport or work-permit expiration, to get reminders here.</p><button className="primary" onClick={onEdit}><Icon name="edit" /> Edit details</button></section>}
 
+    {profile.lifecycleStage === "VISITOR" && <ExtensionEntryCard profile={profile} onOpen={() => onNavigate("extension")} />}
+
     {items.length ? <section className="section-block"><div className="section-heading"><div><h2>Everything in {whose} plan</h2></div><span>{openItems.length} open{doneCount ? ` · ${doneCount} done` : ""}</span></div>
       <p className="review-note"><Icon name="info" size={18} /><span>Dates come from what you entered. Before acting on one, check it against the official source under “Why this date?”.</span></p>
       <div className="action-list">{items.map((item) => <article className={`action-row ${item.completed ? "done" : ""}`} key={item.id}><button className="check-button" disabled={busy === item.id} onClick={() => toggle(item)} aria-label={item.completed ? `Mark “${item.title}” not done` : `Mark “${item.title}” done`} aria-pressed={item.completed}>{item.completed && <Icon name="check" size={14} />}</button><div className="action-date">{item.dueDate ? <><b>{month(item.dueDate)} {day(item.dueDate)}</b><span>{year(item.dueDate)}</span></> : <><b>Ongoing</b><span>No fixed date</span></>}</div><div className="action-copy"><TagRow item={item} /><h3>{item.title}</h3><p>{item.description}</p><details><summary>Why this date?</summary><ul>{item.basis.map((basis) => <li key={basis}>{basis}</li>)}</ul><a href={item.source.url} target="_blank" rel="noreferrer">{item.source.label} · {item.source.ruleVersion} <Icon name="external" /></a></details></div></article>)}</div></section> : null}
@@ -441,6 +447,24 @@ function PlanView({ profile, person, plan, documents, cases, onEdit, onNavigate,
     <p className="legal-note">ImmigrantOS provides general administrative information, not legal advice. It does not determine eligibility or replace a DSO, employer counsel, accredited representative, or immigration attorney.</p>
   </div>;
 }
+
+// Entry point to the Extension of stay (Form I-539) workspace on visitor plans.
+// Dates are computed locally from the saved I-94 date with the same pure logic as the server.
+function ExtensionEntryCard({ profile, onOpen }: { profile: ImmigrationProfile; onOpen: () => void }) {
+  let summary = "Add the I-94 admit-until date to see the dates, checklist and statement drafter.";
+  let tone = "";
+  if (profile.i94ExpirationDate) {
+    try {
+      const t = buildExtensionTimeline(profile.i94ExpirationDate, null, localToday());
+      summary = t.phase === "after-i94-date"
+        ? `The I-94 date you entered (${longDay(t.deadlineDate)}) has passed. Open to review the official sources.`
+        : `File by ${longDay(t.recommendedFileByDate)} if you can · stay ends ${longDay(t.deadlineDate)}`;
+      tone = t.phase === "after-i94-date" || t.phase === "after-recommended-date" ? "warn" : "";
+    } catch { /* invalid stored date: keep the generic summary */ }
+  }
+  return <button type="button" className={`quick-card ext-entry ${tone}`} onClick={onOpen}><span className="quick-icon"><Icon name="calendar" /></span><div><small>Extension of stay · Form I-539</small><strong>Need to stay longer?</strong><p>{summary}</p></div><span className="ext-entry-cta">Open <Icon name="arrow" /></span></button>;
+}
+function longDay(value: string) { return new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}T12:00:00Z`)); }
 
 // Plain-language "when" chip that replaces the raw critical/important/planning severity tags.
 function TagRow({ item }: { item: PlanItem }) {
@@ -726,13 +750,6 @@ function EmptyState({ icon, title, copy }: { icon: string; title: string; copy: 
 function LoadingScreen() { return <main className="center-screen"><Brand /><span className="large-spinner" /><p>Loading your immigration workspace…</p></main>; }
 function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) { return <main className="center-screen error-screen"><span className="error-mark"><Icon name="alert" /></span><h1>Workspace unavailable</h1><p>{message}</p><button className="primary" onClick={onRetry}>Try again</button><a href="/auth/login">Sign in</a></main>; }
 function Brand({ mobile = false }: { mobile?: boolean }) { return <div className={mobile ? "brand mobile-brand" : "brand"}><span className="brand-mark">I</span><span>Immigrant<b>OS</b></span></div>; }
-
-function Icon({ name, size = 20 }: { name: string; size?: number }) {
-  const paths: Record<string, React.ReactNode> = {
-    plan: <><path d="M5 4h14v16H5z" /><path d="M8 9h8M8 13h5M8 17h7" /></>, file: <><path d="M6 2h8l4 4v16H6z" /><path d="M14 2v5h5" /></>, case: <><path d="M5 7h14v13H5zM9 7V4h6v3" /><path d="M5 12h14" /></>, spark: <><path d="m12 3 1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5z" /><path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z" /></>, shield: <><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z" /><path d="m9 12 2 2 4-5" /></>, chevron: <path d="m9 18 6-6-6-6" />, edit: <><path d="m4 20 4-.8L19 8.2 15.8 5 4.8 16z" /><path d="m14 6.8 3.2 3.2" /></>, print: <><path d="M7 9V3h10v6M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" /><path d="M7 14h10v7H7z" /></>, alert: <><path d="m12 3 10 18H2z" /><path d="M12 9v5M12 18h.01" /></>, arrow: <path d="m9 18 6-6-6-6" />, external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 13v7H4V6h7" /></>, check: <path d="m5 12 4 4L19 6" />, upload: <><path d="M12 16V4M7 9l5-5 5 5" /><path d="M4 15v5h16v-5" /></>, download: <><path d="M12 4v12M7 11l5 5 5-5" /><path d="M4 20h16" /></>, trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14" /><path d="M10 11v6M14 11v6" /></>, plus: <path d="M12 5v14M5 12h14" />, info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></>, send: <><path d="m3 3 18 9-18 9 4-9z" /><path d="M7 12h14" /></>, close: <path d="m6 6 12 12M18 6 6 18" />, chevronDown: <path d="m6 9 6 6 6-6" />, users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5" /><path d="M15.5 4.8a3.3 3.3 0 0 1 0 6.4M18 14.8c2 .7 3.2 2.4 3.5 5.2" /></>, gear: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>, logout: <><path d="M10 4H5v16h5" /><path d="M14 8l4 4-4 4M18 12H9" /></>, image: <><rect x="4" y="4" width="16" height="16" rx="2" /><circle cx="9.5" cy="9.5" r="1.5" /><path d="m20 15-4.5-4.5L6 20" /></>,
-  };
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
-}
 
 class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); this.name = "ApiError"; }

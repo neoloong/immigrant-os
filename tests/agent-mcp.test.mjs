@@ -86,9 +86,9 @@ test("agent token lifecycle, MCP protocol, account isolation and compliance", as
       }
       assert.equal((await good(rpc(read.token, "initialize"))).error.code, -32602);
       const readerTools = (await good(rpc(read.token, "tools/list"))).result.tools;
-      assert.equal(readerTools.length, 6);
+      assert.equal(readerTools.length, 7);
       assert.ok(readerTools.some((tool) => tool.name === "get_calendar_export"));
-      const writerTools = (await good(rpc(write.token, "tools/list"))).result.tools; assert.equal(writerTools.length, 9);
+      const writerTools = (await good(rpc(write.token, "tools/list"))).result.tools; assert.equal(writerTools.length, 10);
       assert.ok(writerTools.some((tool) => tool.name === "set_action_completed"));
       for (const tool of writerTools) { assert.match(tool.description, /No eligibility determinations, legal advice/); assert.equal(tool.inputSchema.additionalProperties, false); }
       assert.ok((await DB.prepare("SELECT last_used_at FROM agent_tokens WHERE id = ?").bind(read.agentToken.id).first()).last_used_at);
@@ -123,7 +123,7 @@ test("agent token lifecycle, MCP protocol, account isolation and compliance", as
       assert.equal(profA.displayName, "Account A");
       assert.equal(profA.id, savedA.id);
       assert.equal(profA.isPrimary, true);
-      for (const name of ["list_profiles", "get_profile", "get_action_plan", "get_calendar_export", "list_documents", "list_cases", "update_profile_dates", "set_action_completed", "add_case"]) {
+      for (const name of ["list_profiles", "get_profile", "get_action_plan", "get_calendar_export", "get_extension_helper", "list_documents", "list_cases", "update_profile_dates", "set_action_completed", "add_case"]) {
         const rejected = await good(rpc(write.token, "tools/call", { name, arguments: { owner: b, receiptNumber: "IOE1234567890" } }));
         assert.equal(rejected.error.code, -32602);
         assert.match(rejected.error.message, /owner/);
@@ -273,6 +273,23 @@ test("agent token lifecycle, MCP protocol, account isolation and compliance", as
       assert.equal(afterVisitorComplete.length, 2);
       assert.equal(afterVisitorComplete.find((item) => item.id === extKey).status, "completed");
       assert.equal(afterVisitorComplete.find((item) => item.id.startsWith("universal-passport-expiry:")).status, "open");
+
+      // Extension of stay (I-539) workspace: read-only summary; checklist ids toggle via set_action_completed.
+      const ext = await call(read.token, "get_extension_helper", { profile: "Visitor MCP" });
+      assert.equal(ext.available, true);
+      assert.equal(ext.profileId, created.id);
+      assert.deepEqual(ext.dates.map((d) => [d.id, d.date]), [["earliest-suggested", "2027-03-01"], ["recommended-file-by", "2027-07-18"], ["deadline", "2027-09-01"], ["requested-until", "2028-03-01"]]);
+      assert.match(ext.disclaimer, /not legal advice/);
+      assert.doesNotMatch(JSON.stringify(ext), /\$\d/, "no fee amount");
+      assert.equal(ext.checklist.length, 13);
+      assert.ok(ext.checklist.every((item) => item.status === "open" && item.source.url.startsWith("https://www.uscis.gov/")));
+      const letterItem = ext.checklist.find((item) => item.id.endsWith(":statement-letter"));
+      await call(write.token, "set_action_completed", { profile: created.id, actionId: letterItem.id, completed: true });
+      const extAfter = await call(read.token, "get_extension_helper", { profile: created.id });
+      assert.equal(extAfter.checklist.find((item) => item.id === letterItem.id).status, "completed");
+      assert.equal(extAfter.progress.done, 1);
+      assert.equal((await call(read.token, "get_extension_helper", {})).reason, "not-visitor");
+      assert.equal((await call(read.token, "get_action_plan", { profile: created.id })).actions.length, 2, "checklist does not alter the plan");
 
       const calAfter = await call(read.token, "get_calendar_export", { profile: created.id });
       assert.equal((calAfter.ics.match(/BEGIN:VEVENT/g) ?? []).length, 1);

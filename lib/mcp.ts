@@ -7,6 +7,7 @@ import {
   listCases,
   listDocuments,
   listProfiles,
+  loadExtensionHelper,
   loadPlan,
   resolveProfile,
   saveCase,
@@ -38,6 +39,7 @@ export const AGENT_TOOLS = [
   tool("get_profile", "Read your saved profile fields; these are user-entered records, not verified findings.", false, { profile: profileProperty }),
   tool("get_action_plan", "Read open and completed tasks, explanations, missing required dates, and official rule sources from your web action plan. Planning reminders are not legal filing deadlines.", false, { profile: profileProperty }),
   tool("get_calendar_export", "Export open dated tasks for the selected or primary profile as an iCalendar (.ics) snapshot matching the web calendar download.", false, { profile: profileProperty }),
+  tool("get_extension_helper", "Read the Extension of stay (Form I-539) workspace for a visitor (B-1/B-2) profile: dates computed from the saved I-94 date (suggested window, recommended 45-day file-by date, I-94 date, requested-until date), checklist items with done/not-done state, and official USCIS sources. Checklist ids can be passed to set_action_completed. The statement letter draft stays on the user's device and is not returned. The filing fee is not stated; check the USCIS I-539 page.", false, { profile: profileProperty }),
   tool("list_documents", "List document type, name and upload date only. Does not read file contents.", false, { profile: profileProperty }),
   tool("list_cases", "List your saved USCIS receipts and official status-page links. Does not fetch live statuses.", false, { profile: profileProperty }),
   tool("update_profile_dates", "Update only your saved date/status fields using web validation and task recalculation. Requires write scope; changed task dates reopen completion. Requires an existing profile.", true, updateProperties),
@@ -153,6 +155,33 @@ async function executeTool(name: string, owner: string, args: Record<string, unk
       mimeType: "text/calendar;charset=utf-8",
       ics,
       calendar: ics,
+    };
+  }
+  if (name === "get_extension_helper") {
+    const profile = await resolveTargetProfile(owner, args);
+    const loaded = profile ? await loadExtensionHelper(owner, profile.id) : null;
+    if (!loaded) return { available: false, reason: "no-profile" };
+    const helper = loaded.extension;
+    if (!helper.available) return { profileId: loaded.profileId, available: false, reason: helper.reason, disclaimer: helper.disclaimer, sources: helper.sources };
+    return {
+      profileId: loaded.profileId,
+      available: true,
+      disclaimer: helper.disclaimer,
+      feeNote: helper.feeNote,
+      dates: helper.timeline.dates,
+      requestedUntilIsDefault: helper.timeline.requestedUntilIsDefault,
+      phase: helper.timeline.phase,
+      checklist: helper.checklist.map((item) => ({
+        id: item.id,
+        group: item.group,
+        title: item.title,
+        detail: item.detail,
+        optional: item.optional,
+        status: item.completed ? "completed" : "open",
+        source: item.source,
+      })),
+      progress: helper.progress,
+      sources: helper.sources,
     };
   }
   if (name === "list_documents") {

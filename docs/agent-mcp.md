@@ -14,7 +14,7 @@ A hand-written handler keeps the six-tool audit surface small and adds no depend
 
 ## Tokens and data
 
-Tokens contain a prefix plus 32 random bytes, encoded as hexadecimal. Only the SHA-256 digest is persisted in D1; raw tokens appear only in the create response and component memory until dismissed or unmounted. Listing returns metadata, never a token or digest. Every token expires after **90 days**; re-create to rotate. Read scope exposes the six read tools; write includes read and the three write tools. Revocation is soft deletion so metadata remains visible, and the next request fails. Already-authorized in-flight requests may finish.
+Tokens contain a prefix plus 32 random bytes, encoded as hexadecimal. Only the SHA-256 digest is persisted in D1; raw tokens appear only in the create response and component memory until dismissed or unmounted. Listing returns metadata, never a token or digest. Every token expires after **90 days**; re-create to rotate. Read scope exposes the seven read tools; write includes read and the three write tools. Revocation is soft deletion so metadata remains visible, and the next request fails. Already-authorized in-flight requests may finish.
 
 Migration `drizzle/0002_agent_tokens.sql` adds the token table, owner/hash indexes, scope constraint and `expires_at` in addition to the fields requested in the brief. `db/index.ts` also includes the table for the app's existing fresh-database bootstrap path. Apply the migration before serving traffic, as with existing migrations.
 
@@ -24,6 +24,7 @@ Migration `drizzle/0002_agent_tokens.sql` adds the token table, owner/hash index
 | `get_profile` | read | Saved profile fields including `id` and `isPrimary` (optional `profile` nickname or ID; defaults to primary); no owner or internal timestamps |
 | `get_action_plan` | read | Open and completed web tasks for the selected or primary profile (`id`, `title`, `description`, `dueDate`, `severity`, `basis`, `summary` when present, `status` as `"open"` or `"completed"`, official `source`), plus top-level `missingFields` and `summary` |
 | `get_calendar_export` | read | All-day iCalendar (`.ics`) snapshot of open dated tasks for the selected or primary profile, reusing `calendarFile` from the web export |
+| `get_extension_helper` | read | Extension of stay (Form I-539) workspace for a visitor profile: dates computed from the saved I-94 date (suggested window, 45-day recommended file-by, I-94 date, requested-until), the checklist (`id`, `group`, `title`, `detail`, `optional`, `status`, official `source`), progress and sources. Checklist ids toggle through `set_action_completed`. The statement letter draft stays in the browser and is not returned; no fee amount is stated |
 | `list_documents` | read | Type, filename, upload date only for the selected or primary profile; no content, IDs or storage keys |
 | `list_cases` | read | Saved USCIS cases (`receiptNumber`, `formType`, `nickname`, `statusText`, `lastCheckedAt`) and official USCIS status links for the selected or primary profile; no live status fetch |
 | `update_profile_dates` | write | Partial update to existing profile's date/status fields (optional `profile` nickname or ID); returns saved fields, open/completed actions, and `missingFields` |
