@@ -1,11 +1,22 @@
 import type { PlanResult } from "./rules";
 
+// Extra all-day events that are exported but are not plan/action items (for
+// example the Form I-539 extension dates). They carry no completion state.
+export type CalendarEvent = {
+  id: string;
+  dueDate: string;
+  title: string;
+  description: string;
+  source: { url: string };
+};
+
 // All-day dates avoid timezone shifts. This is a snapshot, not a calendar subscription.
-export function calendarFile(plan: PlanResult) {
+export function calendarFile(plan: Pick<PlanResult, "items">, extraEvents: CalendarEvent[] = []) {
   const escape = (value: string) => value.replace(/\\/g, "\\\\").replace(/\r?\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
   const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Immigrant OS//Action plan//EN", "CALSCALE:GREGORIAN"];
-  for (const item of plan.items.filter((item) => item.dueDate && !item.completed)) {
+  const events = [...plan.items.filter((item) => item.dueDate && !item.completed), ...extraEvents];
+  for (const item of events) {
     const end = new Date(`${item.dueDate}T12:00:00Z`);
     end.setUTCDate(end.getUTCDate() + 1);
     lines.push("BEGIN:VEVENT", `UID:${encodeURIComponent(item.id)}@immigrantos`, `DTSTAMP:${stamp}`,

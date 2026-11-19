@@ -447,3 +447,38 @@ export function buildExtensionHelper(
     sources: ALL_SOURCES,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Calendar export events (export-only; never added to the action plan)
+// ---------------------------------------------------------------------------
+
+export type ExtensionCalendarEvent = {
+  id: string;
+  dueDate: string;
+  title: string;
+  description: string;
+  source: ExtensionSource;
+};
+
+const CALENDAR_NOTE = "Calendar reminder from your entered I-94 date only. Not legal advice or an eligibility determination.";
+
+// All-day events for the recommended file-by date (I-94 minus 45 days) and the
+// I-94 admit-until date (authorized stay ends). Only for VISITOR profiles with a
+// valid I-94 date; every other profile gets no extra events.
+export function extensionCalendarEvents(profile: ExtensionProfileInput): ExtensionCalendarEvent[] {
+  if (profile.lifecycleStage !== "VISITOR" || !isIsoDate(profile.i94ExpirationDate)) return [];
+  const timeline = buildExtensionTimeline(profile.i94ExpirationDate, null, profile.i94ExpirationDate);
+  const titles: Partial<Record<ExtensionDate["id"], string>> = {
+    "recommended-file-by": "Form I-539: recommended file-by date (45 days before I-94 date)",
+    deadline: "Form I-539: I-94 admit-until date — authorized stay ends (file before this date)",
+  };
+  return timeline.dates
+    .filter((entry) => titles[entry.id])
+    .map((entry) => ({
+      id: `i539-${entry.id}:${entry.date}`,
+      dueDate: entry.date,
+      title: titles[entry.id]!,
+      description: `${entry.note}\n${CALENDAR_NOTE}\nSource: ${entry.source.label}${entry.source.section ? ` — ${entry.source.section}` : ""}`,
+      source: entry.source,
+    }));
+}

@@ -1,6 +1,7 @@
 import { ensureDatabase } from "../db";
 import { authenticateAgent, PRIVATE_HEADERS } from "./agent-tokens";
 import { calendarFile } from "./calendar";
+import { extensionCalendarEvents } from "./extension";
 import { normalizeProfile, LIFECYCLE_STAGES } from "./profile";
 import type { PlanItem, PlanResult } from "./rules";
 import {
@@ -149,7 +150,7 @@ async function executeTool(name: string, owner: string, args: Record<string, unk
       items: [],
       missingFields: [],
     };
-    const ics = calendarFile(plan);
+    const ics = calendarFile(plan, profile ? extensionCalendarEvents(profile) : []);
     return {
       filename: "immigrant-os-dates.ics",
       mimeType: "text/calendar;charset=utf-8",

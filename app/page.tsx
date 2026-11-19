@@ -6,7 +6,7 @@ import type { PlanItem, PlanResult, Source } from "../lib/rules";
 import AgentConnect from "./agent-settings";
 import Icon from "./icon";
 import ExtensionView from "./extension-view";
-import { buildExtensionTimeline } from "../lib/extension";
+import { buildExtensionTimeline, extensionCalendarEvents } from "../lib/extension";
 import { calendarFile } from "../lib/calendar";
 
 type View = "plan" | "profiles" | "documents" | "cases" | "assistant" | "settings" | "extension";
@@ -391,9 +391,11 @@ function PlanView({ profile, person, plan, documents, cases, onEdit, onNavigate,
   const [busy, setBusy] = useState("");
   const openItems = plan?.items.filter((item) => !item.completed) ?? [];
   const next = openItems[0];
+  const extensionEvents = extensionCalendarEvents(profile);
+  const canExport = openItems.some((item) => item.dueDate) || extensionEvents.length > 0;
   const exportCalendar = () => {
     if (!plan) return;
-    const url = URL.createObjectURL(new Blob([calendarFile(plan)], { type: "text/calendar;charset=utf-8" }));
+    const url = URL.createObjectURL(new Blob([calendarFile(plan, extensionEvents)], { type: "text/calendar;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url; link.download = "immigrant-os-dates.ics"; link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -427,7 +429,7 @@ function PlanView({ profile, person, plan, documents, cases, onEdit, onNavigate,
     : missing.length ? `The plan is built from the dates you save. ${missing.length} date${s(missing.length)} still missing.` : items.length ? "Everything in this plan is marked complete." : "Add more dates to get reminders.";
 
   return <div className="page plan-page">
-    <section className="page-intro"><div><p className="eyebrow">{new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date())}</p><h1>{person.isSelf ? `${greeting()}, ${firstName(profile.displayName)}.` : `Viewing ${person.possessive} plan`}</h1><p>{subtitle}</p></div><div className="intro-actions"><button className="secondary" onClick={onEdit}><Icon name="edit" /> Edit details</button><button className="secondary" onClick={exportCalendar} disabled={!openItems.some((item) => item.dueDate)} title={openItems.some((item) => item.dueDate) ? undefined : "No dated actions to export yet"}><Icon name="download" /> Export calendar</button><button className="icon-action" onClick={() => window.print()} aria-label="Print action plan"><Icon name="print" /></button></div></section>
+    <section className="page-intro"><div><p className="eyebrow">{new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date())}</p><h1>{person.isSelf ? `${greeting()}, ${firstName(profile.displayName)}.` : `Viewing ${person.possessive} plan`}</h1><p>{subtitle}</p></div><div className="intro-actions"><button className="secondary" onClick={onEdit}><Icon name="edit" /> Edit details</button><button className="secondary" onClick={exportCalendar} disabled={!canExport} title={canExport ? undefined : "No dated actions to export yet"}><Icon name="download" /> Export calendar</button><button className="icon-action" onClick={() => window.print()} aria-label="Print action plan"><Icon name="print" /></button></div></section>
 
     {next ? <>
       {missing.length ? <section className="missing-card"><div className="missing-icon"><Icon name="alert" /></div><div><h2>{missing.length} date{s(missing.length)} missing from {whose} plan</h2><p>Some actions can’t be shown until these are saved.</p><ul>{missing.map((field) => <li key={field}>{field}</li>)}</ul><button onClick={onEdit}>Add missing dates <Icon name="arrow" /></button></div></section> : null}

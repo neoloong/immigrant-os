@@ -262,8 +262,12 @@ test("agent token lifecycle, MCP protocol, account isolation and compliance", as
 
       const calBefore = await call(read.token, "get_calendar_export", { profile: "Visitor MCP" });
       assert.match(calBefore.ics, /^BEGIN:VCALENDAR\r\n/);
-      assert.equal((calBefore.ics.match(/BEGIN:VEVENT/g) ?? []).length, 2);
-      assert.match(calBefore.ics.replace(/\r\n /g, ""), /DTSTART;VALUE=DATE:20270901/);
+      // 2 plan actions + 2 export-only I-539 events (recommended file-by, stay ends).
+      assert.equal((calBefore.ics.match(/BEGIN:VEVENT/g) ?? []).length, 4);
+      const calText = calBefore.ics.replace(/\r\n /g, "");
+      assert.match(calText, /DTSTART;VALUE=DATE:20270901/);
+      assert.match(calText, /UID:i539-recommended-file-by%3A2027-07-18@immigrantos\r\nDTSTAMP:\d+T\d+Z\r\nDTSTART;VALUE=DATE:20270718\r\n/);
+      assert.match(calText, /UID:i539-deadline%3A2027-09-01@immigrantos\r\nDTSTAMP:\d+T\d+Z\r\nDTSTART;VALUE=DATE:20270901\r\n/);
 
       const visitorActions = (await call(read.token, "get_action_plan", { profile: "Visitor MCP" })).actions;
       assert.equal(visitorActions.length, 2);
@@ -292,7 +296,9 @@ test("agent token lifecycle, MCP protocol, account isolation and compliance", as
       assert.equal((await call(read.token, "get_action_plan", { profile: created.id })).actions.length, 2, "checklist does not alter the plan");
 
       const calAfter = await call(read.token, "get_calendar_export", { profile: created.id });
-      assert.equal((calAfter.ics.match(/BEGIN:VEVENT/g) ?? []).length, 1);
+      assert.equal((calAfter.ics.match(/BEGIN:VEVENT/g) ?? []).length, 3, "completed plan action drops; export-only I-539 events stay");
+      const primaryCal = await call(read.token, "get_calendar_export", {});
+      assert.doesNotMatch(primaryCal.ics, /UID:i539-/, "non-visitor export has no I-539 events");
 
       const updated = await call(write.token, "update_profile_dates", { profile: "Visitor MCP", i94ExpirationDate: "2028-03-01" });
       assert.equal(updated.profile.i94ExpirationDate, "2028-03-01");
