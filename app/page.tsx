@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { ImmigrationProfile, LifecycleStage } from "../lib/profile";
 import type { PlanItem, PlanResult, Source } from "../lib/rules";
-import SettingsView from "./agent-settings";
+import AgentConnect from "./agent-settings";
 import { calendarFile } from "../lib/calendar";
 
 type View = "plan" | "profiles" | "documents" | "cases" | "assistant" | "settings";
@@ -36,13 +36,13 @@ const STAGES: { id: LifecycleStage; label: string; short: string; coverage: stri
   { id: "CITIZENSHIP", label: "Citizenship", short: "Naturalization", coverage: "Beta" },
 ];
 
-const NAV: { id: View; label: string; icon: string }[] = [
-  { id: "plan", label: "Action plan", icon: "plan" },
-  { id: "profiles", label: "Profiles", icon: "users" },
-  { id: "documents", label: "Documents", icon: "file" },
-  { id: "cases", label: "Cases", icon: "case" },
-  { id: "assistant", label: "Connect assistant", icon: "spark" },
-  { id: "settings", label: "Settings", icon: "shield" },
+const NAV: { id: View; label: string; short: string; icon: string }[] = [
+  { id: "plan", label: "Action plan", short: "Plan", icon: "plan" },
+  { id: "profiles", label: "Profiles", short: "Profiles", icon: "users" },
+  { id: "documents", label: "Documents", short: "Documents", icon: "file" },
+  { id: "cases", label: "Cases", short: "Cases", icon: "case" },
+  { id: "assistant", label: "Connect assistant", short: "Assistant", icon: "spark" },
+  { id: "settings", label: "Settings", short: "Settings", icon: "gear" },
 ];
 
 const STAGE_LABELS: Record<string, string> = {
@@ -52,6 +52,27 @@ const STAGE_LABELS: Record<string, string> = {
 };
 function statusLabel(code: string) { return STAGE_LABELS[code] ?? code; }
 function stageLabel(stage: LifecycleStage) { return STAGES.find((item) => item.id === stage)?.label ?? stage; }
+
+type Workspace = { profile: ImmigrationProfile | null; profiles: ImmigrationProfile[]; plan: PlanResult | null; documents: SavedDocument[]; cases: TrackedCase[] };
+type ToastState = { message: string; tone: "success" | "error" };
+type Notify = (message: string, tone?: ToastState["tone"]) => void;
+
+async function loadWorkspace(targetId: string | null): Promise<Workspace> {
+  const query = targetId ? `?profileId=${encodeURIComponent(targetId)}` : "";
+  const [profileData, planData, documentData, caseData] = await Promise.all([
+    api<{ profile: ImmigrationProfile | null; profiles?: ImmigrationProfile[] }>(`/api/profile${query}`),
+    api<{ plan: PlanResult | null }>(`/api/plan${query}`),
+    api<{ documents: SavedDocument[] }>(`/api/documents${query}`),
+    api<{ cases: TrackedCase[] }>(`/api/cases${query}`),
+  ]);
+  return {
+    profile: profileData.profile,
+    profiles: profileData.profiles ?? (profileData.profile ? [profileData.profile] : []),
+    plan: planData.plan,
+    documents: documentData.documents,
+    cases: caseData.cases,
+  };
+}
 
 export default function Home() {
   const [view, setView] = useState<View>("plan");
@@ -64,49 +85,54 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [profileOpen, setProfileOpen] = useState(false);
   const [addingProfile, setAddingProfile] = useState(false);
-  const [toast, setToast] = useState("");
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
   const [fatalError, setFatalError] = useState("");
+  const toastTimer = useRef<number | undefined>(undefined);
 
+  const notify: Notify = (message, tone = "success") => {
+    window.clearTimeout(toastTimer.current);
+    setToast({ message, tone });
+    toastTimer.current = window.setTimeout(() => setToast(null), tone === "error" ? 7000 : 3400);
+  };
+
+  const applyWorkspace = (data: Workspace) => {
+    setProfile(data.profile);
+    setProfiles(data.profiles);
+    setActiveProfileId(data.profile?.id ?? null);
+    setPlan(data.plan);
+    setDocuments(data.documents);
+    setCases(data.cases);
+    return data.profile?.id ?? null;
+  };
+
+  // Reloads the workspace for the active (or requested) profile. It never swaps the
+  // on-screen person silently: a transient failure keeps the current data and says so;
+  // only a profile that no longer exists (404) falls back to the primary profile, with
+  // an explicit notice naming who is now shown.
   const refresh = async (requestedProfileId?: string | null): Promise<string | null> => {
     setFatalError("");
     const targetId = requestedProfileId !== undefined ? requestedProfileId : activeProfileId;
-    const query = targetId ? `?profileId=${encodeURIComponent(targetId)}` : "";
     try {
-      const [profileData, planData, documentData, caseData] = await Promise.all([
-        api<{ profile: ImmigrationProfile | null; profiles?: ImmigrationProfile[] }>(`/api/profile${query}`),
-        api<{ plan: PlanResult | null }>(`/api/plan${query}`),
-        api<{ documents: SavedDocument[] }>(`/api/documents${query}`),
-        api<{ cases: TrackedCase[] }>(`/api/cases${query}`),
-      ]);
-      setProfile(profileData.profile);
-      setProfiles(profileData.profiles ?? (profileData.profile ? [profileData.profile] : []));
-      setActiveProfileId(profileData.profile?.id ?? null);
-      setPlan(planData.plan);
-      setDocuments(documentData.documents);
-      setCases(caseData.cases);
-      return profileData.profile?.id ?? null;
+      return applyWorkspace(await loadWorkspace(targetId));
     } catch (error) {
-      if (targetId) {
+      const message = error instanceof Error ? error.message : "Unable to load your workspace.";
+      if (targetId && error instanceof ApiError && error.status === 404) {
         try {
-          const [profileData, planData, documentData, caseData] = await Promise.all([
-            api<{ profile: ImmigrationProfile | null; profiles?: ImmigrationProfile[] }>("/api/profile"),
-            api<{ plan: PlanResult | null }>("/api/plan"),
-            api<{ documents: SavedDocument[] }>("/api/documents"),
-            api<{ cases: TrackedCase[] }>("/api/cases"),
-          ]);
-          setProfile(profileData.profile);
-          setProfiles(profileData.profiles ?? (profileData.profile ? [profileData.profile] : []));
-          setActiveProfileId(profileData.profile?.id ?? null);
-          setPlan(planData.plan);
-          setDocuments(documentData.documents);
-          setCases(caseData.cases);
-          return profileData.profile?.id ?? null;
+          const data = await loadWorkspace(null);
+          const loadedId = applyWorkspace(data);
+          if (data.profile) notify(`That profile is no longer available, so you are now viewing ${profileLabel(data.profile, data.profiles.indexOf(data.profile))}.`, "error");
+          return loadedId;
         } catch (fallbackError) {
-          setFatalError(fallbackError instanceof Error ? fallbackError.message : "Unable to load your workspace.");
+          setFatalError(fallbackError instanceof Error ? fallbackError.message : message);
           return null;
         }
       }
-      setFatalError(error instanceof Error ? error.message : "Unable to load your workspace.");
+      if (profile) {
+        notify(`Couldn’t refresh ${profileLabel(profile, profiles.indexOf(profile))}’s information. What you see may be out of date. ${message}`, "error");
+        return profile.id ?? null;
+      }
+      setFatalError(message);
       return null;
     } finally {
       setLoading(false);
@@ -115,24 +141,29 @@ export default function Home() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void refresh(); }, 0);
-    return () => window.clearTimeout(timer);
+    return () => { window.clearTimeout(timer); window.clearTimeout(toastTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const notify = (message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 3400);
-  };
-
+  // Switching loads the chosen profile first and only replaces what is on screen once that
+  // profile has loaded. On failure the current profile stays visible and the error says so.
   const selectProfile = async (nextProfileId: string) => {
-    if (!nextProfileId || nextProfileId === profile?.id) return;
-    setActiveProfileId(nextProfileId);
-    const loadedId = await refresh(nextProfileId);
-    const chosen = profiles.find((item) => item.id === nextProfileId);
-    if (loadedId === nextProfileId) {
-      notify(`Switched to ${chosen?.displayName || "primary profile"}.`);
-    } else if (loadedId) {
-      notify("Could not open that profile, so your primary profile is shown instead.");
+    if (!nextProfileId || nextProfileId === profile?.id || switchingTo) return;
+    const chosenIndex = profiles.findIndex((item) => item.id === nextProfileId);
+    const chosenLabel = chosenIndex >= 0 ? profileLabel(profiles[chosenIndex], chosenIndex) : "that profile";
+    const currentLabel = profile ? profileLabel(profile, profiles.indexOf(profile)) : "your current profile";
+    setSwitchingTo(nextProfileId);
+    try {
+      const data = await loadWorkspace(nextProfileId);
+      if (data.profile?.id !== nextProfileId) throw new Error("A different profile was returned.");
+      applyWorkspace(data);
+      notify(`Now viewing ${chosenLabel}.`);
+    } catch (error) {
+      const reason = error instanceof Error ? ` (${error.message})` : "";
+      notify(`Couldn’t open ${chosenLabel}${reason}. You are still viewing ${currentLabel}.`, "error");
+      if (error instanceof ApiError && error.status === 404) void refresh(profile?.id ?? null);
+    } finally {
+      setSwitchingTo(null);
     }
   };
 
@@ -145,7 +176,7 @@ export default function Home() {
       await refresh(activeProfileId);
       notify("Profile renamed.");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Unable to rename profile.");
+      notify(error instanceof Error ? error.message : "Unable to rename profile.", "error");
       throw error;
     }
   };
@@ -166,94 +197,78 @@ export default function Home() {
       await refresh(nextId);
       notify(`Profile "${label}" deleted.`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Unable to delete profile.");
+      notify(error instanceof Error ? error.message : "Unable to delete profile.", "error");
     }
   };
+
+  const toastNode = toast && <div className={`toast ${toast.tone}`} role={toast.tone === "error" ? "alert" : "status"}><span><Icon name={toast.tone === "error" ? "alert" : "check"} /></span>{toast.message}</div>;
 
   if (loading) return <LoadingScreen />;
   if (fatalError) return <ErrorScreen message={fatalError} onRetry={() => { setLoading(true); void refresh(); }} />;
   if (!profile) return <Onboarding onSaved={(createdId) => { setLoading(true); void refresh(createdId ?? null); }} />;
   if (addingProfile) {
     return (
-      <Onboarding
-        mode="add"
-        onCancel={() => setAddingProfile(false)}
-        onSaved={(createdId) => {
-          setAddingProfile(false);
-          setLoading(true);
-          void refresh(createdId ?? null);
-          notify("Profile added and action plan calculated.");
-        }}
-      />
+      <>
+        <Onboarding
+          mode="add"
+          onCancel={() => setAddingProfile(false)}
+          onSaved={(createdId) => {
+            setAddingProfile(false);
+            setLoading(true);
+            void refresh(createdId ?? null);
+            notify("Profile added and action plan calculated.");
+          }}
+        />
+        {toastNode}
+      </>
     );
   }
 
-  const stage = STAGES.find((item) => item.id === profile.lifecycleStage) ?? STAGES[0];
   const profileList = profiles.length ? profiles : [profile];
-  const activeLabel = profileLabel(profile, profileList.indexOf(profile));
-  const viewingLabel = profileList.length > 1 ? activeLabel : undefined;
+  const person = personFor(profile, profileList.indexOf(profile));
+  const go = (next: View) => { setView(next); window.scrollTo({ top: 0 }); };
 
   return (
     <main className="app-shell">
-      <aside className="sidebar">
-        <Brand />
-        <div className="journey-chip"><span className="journey-dot" /><div><small>VIEWING</small><strong>{profileLabel(profile, profileList.indexOf(profile))}</strong><em>{stage.label}</em></div></div>
-        <nav className="side-nav" aria-label="Main navigation">
-          {NAV.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon name={item.icon} /><span>{item.label}</span></button>)}
-        </nav>
-        <div className="privacy-note"><Icon name="shield" /><div><strong>Account-private workspace</strong><span>Files and records are scoped to your signed-in account.</span></div></div>
-        <form action="/auth/logout" method="post"><button type="submit">Sign out</button></form>
-        <button className="profile-button" onClick={() => setProfileOpen(true)}><span className="avatar">{initials(profile.displayName)}</span><span><strong>{profile.displayName || "Your profile"}</strong><small>Edit immigration profile</small></span><Icon name="chevron" /></button>
-      </aside>
+      <header className="app-nav">
+        <div className="app-nav-inner">
+          <button type="button" className="brand-button" onClick={() => go("plan")} aria-label="Immigrant OS — go to action plan"><Brand /></button>
+          <nav className="primary-nav" aria-label="Main navigation">
+            {NAV.map((item) => <button type="button" key={item.id} className={view === item.id ? "active" : ""} aria-current={view === item.id ? "page" : undefined} onClick={() => go(item.id)}><Icon name={item.icon} size={18} /><span>{item.label}</span></button>)}
+          </nav>
+          <ProfileSwitcher
+            profiles={profileList}
+            active={profile}
+            switchingTo={switchingTo}
+            onSelect={(id) => void selectProfile(id)}
+            onAdd={() => setAddingProfile(true)}
+            onManage={() => go("profiles")}
+            onEdit={() => setProfileOpen(true)}
+          />
+        </div>
+      </header>
 
-      <section className="workspace">
-        <header className="topbar">
-          <Brand mobile />
-          <div className="profile-switcher" role="group" aria-label="Profile switcher">
-            <label className="switcher-select-wrap">
-              <span className="visually-hidden">Switch profile</span>
-              <select
-                aria-label="Switch profile"
-                value={profile.id ?? ""}
-                onChange={(event) => {
-                  if (event.target.value === "__add__") {
-                    setAddingProfile(true);
-                    return;
-                  }
-                  void selectProfile(event.target.value);
-                }}
-              >
-                {profileList.map((item, idx) => (
-                  <option key={item.id ?? idx} value={item.id ?? ""}>
-                    {profileLabel(item, idx)}
-                  </option>
-                ))}
-                <option value="__add__">+ Add profile…</option>
-              </select>
-            </label>
-          </div>
-          <div className="topbar-copy"><span className="coverage-dot" /><b>Dates from your profile · Review official guidance</b></div>
-          <button className="avatar top-avatar" onClick={() => setProfileOpen(true)} aria-label="Edit profile">{initials(profile.displayName)}</button>
-        </header>
-
-        {view === "plan" && <PlanView key={profile.id ?? "primary"} profile={profile} plan={plan} documents={documents} cases={cases} viewingLabel={viewingLabel} onEdit={() => setProfileOpen(true)} onNavigate={setView} onRefresh={async () => { await refresh(); }} notify={notify} />}
+      <section className="workspace" aria-busy={switchingTo ? true : undefined}>
+        {view === "plan" && <PlanView key={profile.id ?? "primary"} profile={profile} person={person} plan={plan} documents={documents} cases={cases} onEdit={() => setProfileOpen(true)} onNavigate={go} onRefresh={async () => { await refresh(); }} notify={notify} />}
         {view === "profiles" && (
           <ProfilesView
             profiles={profileList}
             activeProfileId={profile.id}
+            person={person}
+            switchingTo={switchingTo}
             onSelectProfile={(id) => void selectProfile(id)}
             onAddProfile={() => setAddingProfile(true)}
             onRenameProfile={handleRenameProfile}
             onDeleteProfile={handleDeleteProfile}
           />
         )}
-        {view === "documents" && <DocumentsView key={profile.id ?? "primary"} profileId={profile.id} viewingLabel={viewingLabel} documents={documents} onChanged={async () => { await refresh(); }} notify={notify} />}
-        {view === "cases" && <CasesView key={profile.id ?? "primary"} profileId={profile.id} viewingLabel={viewingLabel} cases={cases} onChanged={async () => { await refresh(); }} notify={notify} />}
-        {view === "assistant" && <AssistantView key={profile.id ?? "primary"} profileId={profile.id} viewingLabel={viewingLabel} plan={plan} />}
-        {view === "settings" && <SettingsView />}
+        {view === "documents" && <DocumentsView key={profile.id ?? "primary"} profileId={profile.id} person={person} documents={documents} onChanged={async () => { await refresh(); }} notify={notify} />}
+        {view === "cases" && <CasesView key={profile.id ?? "primary"} profileId={profile.id} person={person} cases={cases} onChanged={async () => { await refresh(); }} notify={notify} />}
+        {view === "assistant" && <AssistantView key={profile.id ?? "primary"} profileId={profile.id} person={person} plan={plan} />}
+        {view === "settings" && <SettingsPage profile={profile} person={person} onEdit={() => setProfileOpen(true)} onManageProfiles={() => go("profiles")} />}
       </section>
 
-      <nav className="bottom-nav" aria-label="Mobile navigation">{NAV.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon name={item.icon} /><span>{item.label}</span></button>)}</nav>
+      <nav className="bottom-nav" aria-label="Main navigation">{NAV.map((item) => <button type="button" key={item.id} className={view === item.id ? "active" : ""} aria-current={view === item.id ? "page" : undefined} onClick={() => go(item.id)}><Icon name={item.icon} /><span>{item.short}</span></button>)}</nav>
 
       {profileOpen && (
         <ProfileDialog
@@ -271,12 +286,95 @@ export default function Home() {
           }}
         />
       )}
-      {toast && <div className="toast"><span><Icon name="check" /></span>{toast}</div>}
+      {toastNode}
     </main>
   );
 }
 
-function PlanView({ profile, plan, documents, cases, viewingLabel, onEdit, onNavigate, onRefresh, notify }: { profile: ImmigrationProfile; plan: PlanResult | null; documents: SavedDocument[]; cases: TrackedCase[]; viewingLabel?: string; onEdit: () => void; onNavigate: (view: View) => void; onRefresh: () => Promise<void>; notify: (message: string) => void }) {
+function ProfileSwitcher({ profiles, active, switchingTo, onSelect, onAdd, onManage, onEdit }: {
+  profiles: ImmigrationProfile[];
+  active: ImmigrationProfile;
+  switchingTo: string | null;
+  onSelect: (id: string) => void;
+  onAdd: () => void;
+  onManage: () => void;
+  onEdit: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: MouseEvent | TouchEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); triggerRef.current?.focus(); } };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("touchstart", onPointer);
+    document.addEventListener("keydown", onKey);
+    rootRef.current?.querySelector<HTMLElement>("[role^=menuitem]")?.focus();
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("touchstart", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const moveFocus = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const items = Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[role^=menuitem]") ?? []);
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    const next = event.key === "ArrowDown" ? (index + 1) % items.length : (index - 1 + items.length) % items.length;
+    items[next]?.focus();
+  };
+
+  const activeIndex = profiles.findIndex((item) => item.id === active.id);
+  const activeName = profileLabel(active, activeIndex);
+  const activePerson = personFor(active, activeIndex);
+  const pending = switchingTo ? profiles.find((item) => item.id === switchingTo) : undefined;
+  const close = (then: () => void) => () => { setOpen(false); then(); };
+
+  return <div className="switcher" ref={rootRef}>
+    <button ref={triggerRef} type="button" className={`switcher-trigger ${open ? "open" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label={`Viewing ${activeName}. Switch profile`} onClick={() => setOpen((value) => !value)}>
+      <span className="avatar">{initials(active.displayName)}</span>
+      <span className="switcher-text"><small>{pending ? "Switching…" : "Viewing"}</small><strong>{pending ? profileLabel(pending, profiles.indexOf(pending)) : activeName}</strong></span>
+      <Icon name="chevronDown" size={16} />
+    </button>
+    {open && <div className="switcher-menu" role="menu" aria-label="Switch profile" onKeyDown={moveFocus}>
+      <p className="switcher-menu-label">Switch profile</p>
+      {profiles.map((item, idx) => {
+        const isActive = item.id === active.id;
+        return <button type="button" role="menuitemradio" aria-checked={isActive} key={item.id ?? idx} className={isActive ? "current" : ""} disabled={!!switchingTo} onClick={close(() => { if (item.id && !isActive) onSelect(item.id); })}>
+          <span className="avatar">{initials(item.displayName)}</span>
+          <span className="switcher-item-text"><strong>{profileLabel(item, idx)}{item.isPrimary ? <em> · You</em> : null}</strong><small>{stageLabel(item.lifecycleStage)}</small></span>
+          {isActive && <Icon name="check" size={18} />}
+        </button>;
+      })}
+      <div className="switcher-divider" role="separator" />
+      <button type="button" role="menuitem" onClick={close(onEdit)}><Icon name="edit" size={18} /><span>Edit {activePerson.possessive} details</span></button>
+      <button type="button" role="menuitem" onClick={close(onAdd)}><Icon name="plus" size={18} /><span>Add a family member</span></button>
+      <button type="button" role="menuitem" onClick={close(onManage)}><Icon name="users" size={18} /><span>Manage profiles</span></button>
+      <div className="switcher-divider" role="separator" />
+      <form action="/auth/logout" method="post"><button type="submit" role="menuitem"><Icon name="logout" size={18} /><span>Sign out</span></button></form>
+    </div>}
+  </div>;
+}
+
+function SettingsPage({ profile, person, onEdit, onManageProfiles }: { profile: ImmigrationProfile; person: Person; onEdit: () => void; onManageProfiles: () => void }) {
+  return <div className="page settings-page">
+    <section className="page-intro"><div><p className="eyebrow">SETTINGS</p><h1>{person.possessiveCap} settings</h1><p>Edit {person.isSelf ? "your" : person.possessive} immigration details, or manage your account.</p></div></section>
+    <section className="settings-card">
+      <div><h2>{person.possessiveCap} profile details</h2><p>{stageLabel(profile.lifecycleStage)}{profile.statusSubtype ? ` · ${statusLabel(profile.statusSubtype)}` : ""}. Dates you enter here build the action plan.</p></div>
+      <div className="settings-actions"><button type="button" className="primary" onClick={onEdit}><Icon name="edit" /> Edit details</button><button type="button" className="secondary" onClick={onManageProfiles}><Icon name="users" /> Manage profiles</button></div>
+    </section>
+    <section className="settings-card">
+      <div><h2>Account</h2><p>Your files and records are private to your signed-in account. Signing out ends the session for every profile in this account.</p></div>
+      <div className="settings-actions"><form action="/auth/logout" method="post"><button type="submit" className="secondary"><Icon name="logout" /> Sign out</button></form></div>
+    </section>
+    <p className="legal-note">ImmigrantOS provides general administrative information, not legal advice. It does not determine eligibility or replace a DSO, employer counsel, accredited representative, or immigration attorney.</p>
+  </div>;
+}
+
+function PlanView({ profile, person, plan, documents, cases, onEdit, onNavigate, onRefresh, notify }: { profile: ImmigrationProfile; person: Person; plan: PlanResult | null; documents: SavedDocument[]; cases: TrackedCase[]; onEdit: () => void; onNavigate: (view: View) => void; onRefresh: () => Promise<void>; notify: Notify }) {
   const [busy, setBusy] = useState("");
   const openItems = plan?.items.filter((item) => !item.completed) ?? [];
   const next = openItems[0];
@@ -299,14 +397,14 @@ function PlanView({ profile, plan, documents, cases, viewingLabel, onEdit, onNav
       await onRefresh();
       notify(item.completed ? "Action reopened." : "Action marked complete.");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Unable to update action.");
+      notify(error instanceof Error ? error.message : "Unable to update action.", "error");
     } finally {
       setBusy("");
     }
   };
 
   return <div className="page plan-page">
-    <section className="page-intro"><div><p className="eyebrow">{new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</p><h1>{viewingLabel ? `Viewing ${viewingLabel}’s plan` : `${greeting()}, ${firstName(profile.displayName)}.`}</h1><p>{plan?.summary}</p></div><div className="intro-actions"><button className="secondary" onClick={onEdit}><Icon name="edit" /> Update profile</button><button className="secondary" onClick={exportCalendar} disabled={!openItems.some((item) => item.dueDate)}><Icon name="download" /> Export calendar</button><button className="icon-action" onClick={() => window.print()} aria-label="Print action plan"><Icon name="print" /></button></div></section>
+    <section className="page-intro"><div><p className="eyebrow">{new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</p><h1>{person.isSelf ? `${greeting()}, ${firstName(profile.displayName)}.` : `Viewing ${person.possessive} plan`}</h1><p>{plan?.summary}</p></div><div className="intro-actions"><button className="secondary" onClick={onEdit}><Icon name="edit" /> Update profile</button><button className="secondary" onClick={exportCalendar} disabled={!openItems.some((item) => item.dueDate)}><Icon name="download" /> Export calendar</button><button className="icon-action" onClick={() => window.print()} aria-label="Print action plan"><Icon name="print" /></button></div></section>
 
     {plan?.missingFields.length ? <section className="missing-card"><div className="missing-icon"><Icon name="alert" /></div><div><span className="overline">COMPLETE YOUR TIMELINE</span><h2>{plan.missingFields.length} profile item{plan.missingFields.length === 1 ? "" : "s"} missing</h2><ul>{plan.missingFields.map((field) => <li key={field}>{field}</li>)}</ul><button onClick={onEdit}>Add missing details <Icon name="arrow" /></button></div></section> : null}
 
@@ -320,9 +418,11 @@ function PlanView({ profile, plan, documents, cases, viewingLabel, onEdit, onNav
   </div>;
 }
 
-function ProfilesView({ profiles, activeProfileId, onSelectProfile, onAddProfile, onRenameProfile, onDeleteProfile }: {
+function ProfilesView({ profiles, activeProfileId, person, switchingTo, onSelectProfile, onAddProfile, onRenameProfile, onDeleteProfile }: {
   profiles: ImmigrationProfile[];
   activeProfileId?: string;
+  person: Person;
+  switchingTo: string | null;
   onSelectProfile: (id: string) => void;
   onAddProfile: () => void;
   onRenameProfile: (id: string, displayName: string) => Promise<void>;
@@ -346,7 +446,7 @@ function ProfilesView({ profiles, activeProfileId, onSelectProfile, onAddProfile
   };
 
   return <div className="page">
-    <section className="page-intro"><div><p className="eyebrow">PROFILES</p><h1>Who are we tracking?</h1><p>Switch between family members, rename a profile, or add someone new. Each profile keeps its own dates, documents, and cases.</p></div><div className="intro-actions"><button type="button" className="primary" onClick={onAddProfile}><Icon name="plus" /> Add profile</button></div></section>
+    <section className="page-intro"><div><p className="eyebrow">PROFILES</p><h1>Family profiles</h1><p>You are viewing <strong>{person.name}</strong>. Each profile keeps its own dates, documents, and cases. Switch, rename, or add someone new.</p></div><div className="intro-actions"><button type="button" className="primary" onClick={onAddProfile}><Icon name="plus" /> Add profile</button></div></section>
 
     <div className="section-block profile-management">
       <div className="agent-token-list">
@@ -366,7 +466,7 @@ function ProfilesView({ profiles, activeProfileId, onSelectProfile, onAddProfile
               </form>}
             </div>
             <div className="agent-buttons">
-              {!isActive && itemId && <button type="button" className="secondary" onClick={() => onSelectProfile(itemId)}>View this profile</button>}
+              {!isActive && itemId && <button type="button" className="secondary" disabled={!!switchingTo} onClick={() => onSelectProfile(itemId)}>{switchingTo === itemId ? "Opening…" : "View this profile"}</button>}
               {itemId && !isRenaming && <button type="button" className="secondary" onClick={() => { setRenamingId(itemId); setRenameDraft(item.displayName || ""); }}>Rename</button>}
               {itemId && canDelete && <button type="button" className="secondary danger-text" disabled={busy} onClick={() => void onDeleteProfile(item)}>Delete</button>}
             </div>
@@ -377,7 +477,7 @@ function ProfilesView({ profiles, activeProfileId, onSelectProfile, onAddProfile
   </div>;
 }
 
-function DocumentsView({ profileId, viewingLabel, documents, onChanged, notify }: { profileId?: string; viewingLabel?: string; documents: SavedDocument[]; onChanged: () => Promise<void>; notify: (message: string) => void }) {
+function DocumentsView({ profileId, person, documents, onChanged, notify }: { profileId?: string; person: Person; documents: SavedDocument[]; onChanged: () => Promise<void>; notify: Notify }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [kind, setKind] = useState("Passport");
   const [uploading, setUploading] = useState(false);
@@ -394,9 +494,9 @@ function DocumentsView({ profileId, viewingLabel, documents, onChanged, notify }
       await api("/api/documents", { method: "POST", body: form });
       if (fileRef.current) fileRef.current.value = "";
       await onChanged();
-      notify(viewingLabel ? `${file.name} saved for ${viewingLabel}.` : `${file.name} saved.`);
+      notify(`${file.name} saved to ${person.possessive} documents.`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Upload failed.");
+      notify(error instanceof Error ? error.message : "Upload failed.", "error");
     } finally {
       setUploading(false);
     }
@@ -409,11 +509,11 @@ function DocumentsView({ profileId, viewingLabel, documents, onChanged, notify }
       await onChanged();
       notify("Document deleted.");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Delete failed.");
+      notify(error instanceof Error ? error.message : "Delete failed.", "error");
     }
   };
 
-  return <div className="page"><section className="page-intro"><div><p className="eyebrow">PRIVATE DOCUMENT VAULT</p><h1>{viewingLabel ? `Documents for ${viewingLabel}` : "Your documents"}</h1><p>Your files are stored privately with your signed-in account.</p></div></section><section className="upload-panel"><div className="upload-mark"><Icon name="upload" /></div><div><h2>Add a document</h2><p>Save a PDF, JPEG, or PNG. OCR and field extraction are not enabled in this build, so use Profile to enter confirmed dates.</p></div><label><span>Document type</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option>Passport</option><option>Visa</option><option>Form I-20</option><option>I-94</option><option>EAD</option><option>USCIS notice</option><option>Green Card</option><option>Other</option></select></label><input ref={fileRef} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => void upload(event.target.files?.[0])} /><button className="primary" disabled={uploading} onClick={() => fileRef.current?.click()}><Icon name="upload" /> {uploading ? "Uploading…" : "Choose file"}</button></section>
+  return <div className="page"><section className="page-intro"><div><p className="eyebrow">PRIVATE DOCUMENT VAULT</p><h1>{person.possessiveCap} documents</h1><p>Your files are stored privately with your signed-in account.</p></div></section><section className="upload-panel"><div className="upload-mark"><Icon name="upload" /></div><div><h2>Add a document</h2><p>Save a PDF, JPEG, or PNG. OCR and field extraction are not enabled in this build, so use Profile to enter confirmed dates.</p></div><label><span>Document type</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option>Passport</option><option>Visa</option><option>Form I-20</option><option>I-94</option><option>EAD</option><option>USCIS notice</option><option>Green Card</option><option>Other</option></select></label><input ref={fileRef} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => void upload(event.target.files?.[0])} /><button className="primary" disabled={uploading} onClick={() => fileRef.current?.click()}><Icon name="upload" /> {uploading ? "Uploading…" : "Choose file"}</button></section>
 
     <div className="section-heading document-heading"><div><p className="eyebrow">SAVED FILES</p><h2>{documents.length} document{documents.length === 1 ? "" : "s"}</h2></div><span>Maximum 10 MB each</span></div>
     {documents.length ? <div className="document-list">{documents.map((document) => <article className="document-row" key={document.id}><span className="document-icon"><Icon name="file" /></span><div><span className="tag info">{document.kind}</span><h3>{document.filename}</h3><p>{formatBytes(document.sizeBytes)} · Uploaded {formatDateTime(document.uploadedAt)}</p></div><a className="icon-action" href={`/api/documents?download=${encodeURIComponent(document.id)}${profileParam}`} aria-label={`Download ${document.filename}`}><Icon name="download" /></a><button className="icon-action danger" onClick={() => void remove(document)} aria-label={`Delete ${document.filename}`}><Icon name="trash" /></button></article>)}</div> : <EmptyState icon="file" title="No saved documents" copy="Upload one document to test the real vault flow." />}
@@ -421,7 +521,7 @@ function DocumentsView({ profileId, viewingLabel, documents, onChanged, notify }
   </div>;
 }
 
-function CasesView({ profileId, viewingLabel, cases, onChanged, notify }: { profileId?: string; viewingLabel?: string; cases: TrackedCase[]; onChanged: () => Promise<void>; notify: (message: string) => void }) {
+function CasesView({ profileId, person, cases, onChanged, notify }: { profileId?: string; person: Person; cases: TrackedCase[]; onChanged: () => Promise<void>; notify: Notify }) {
   const [receiptNumber, setReceiptNumber] = useState("");
   const [formType, setFormType] = useState("");
   const [nickname, setNickname] = useState("");
@@ -435,18 +535,18 @@ function CasesView({ profileId, viewingLabel, cases, onChanged, notify }: { prof
       await api("/api/cases", { method: "POST", body: JSON.stringify({ receiptNumber, formType, nickname, profileId }) });
       setReceiptNumber(""); setFormType(""); setNickname("");
       await onChanged();
-      notify("USCIS receipt saved.");
+      notify(`USCIS receipt saved to ${person.possessive} cases.`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Unable to save case.");
+      notify(error instanceof Error ? error.message : "Unable to save case.", "error");
     } finally { setSaving(false); }
   };
 
   const remove = async (id: string) => {
     try { await api(`/api/cases?id=${encodeURIComponent(id)}${profileParam}`, { method: "DELETE" }); await onChanged(); notify("Case removed."); }
-    catch (error) { notify(error instanceof Error ? error.message : "Unable to remove case."); }
+    catch (error) { notify(error instanceof Error ? error.message : "Unable to remove case.", "error"); }
   };
 
-  return <div className="page"><section className="page-intro"><div><p className="eyebrow">CASE WORKSPACE</p><h1>{viewingLabel ? `${viewingLabel}’s USCIS receipts` : "USCIS receipts"}</h1><p>Keep each filing separate and open the official status tool with the correct receipt number.</p></div></section><form className="case-form" onSubmit={submit}><div><label>Receipt number</label><input value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value.toUpperCase())} placeholder="IOE1234567890" maxLength={15} required /><small>3 letters + 10 digits</small></div><div><label>Form</label><input value={formType} onChange={(event) => setFormType(event.target.value)} placeholder="I-765" /></div><div><label>Label</label><input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="My OPT EAD" /></div><button className="primary" disabled={saving}><Icon name="plus" /> {saving ? "Saving…" : "Add case"}</button></form>
+  return <div className="page"><section className="page-intro"><div><p className="eyebrow">CASE WORKSPACE</p><h1>{person.possessiveCap} USCIS receipts</h1><p>Keep each filing separate and open the official status tool with the correct receipt number.</p></div></section><form className="case-form" onSubmit={submit}><div><label>Receipt number</label><input value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value.toUpperCase())} placeholder="IOE1234567890" maxLength={15} required /><small>3 letters + 10 digits</small></div><div><label>Form</label><input value={formType} onChange={(event) => setFormType(event.target.value)} placeholder="I-765" /></div><div><label>Label</label><input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="My OPT EAD" /></div><button className="primary" disabled={saving}><Icon name="plus" /> {saving ? "Saving…" : "Add case"}</button></form>
 
     <div className="case-list">{cases.map((item) => <article className="case-card" key={item.id}><div className="case-form-badge">{item.formType || "CASE"}</div><div><span>{item.nickname || "USCIS filing"}</span><h2>{item.receiptNumber}</h2><p>Saved {formatDateTime(item.createdAt)} · Check updates on the official USCIS website</p></div><a className="secondary" href={`https://egov.uscis.gov/casestatus/mycasestatus.do?appReceiptNum=${encodeURIComponent(item.receiptNumber)}`} target="_blank" rel="noreferrer">Open official status <Icon name="external" /></a><button className="icon-action danger" onClick={() => void remove(item.id)} aria-label="Remove case"><Icon name="trash" /></button></article>)}</div>
     {!cases.length && <EmptyState icon="case" title="No receipts yet" copy="Add an actual USCIS receipt number above. It will persist across sessions." />}
@@ -454,7 +554,7 @@ function CasesView({ profileId, viewingLabel, cases, onChanged, notify }: { prof
   </div>;
 }
 
-function AssistantView({ profileId, viewingLabel, plan }: { profileId?: string; viewingLabel?: string; plan: PlanResult | null }) {
+function AssistantView({ profileId, person, plan }: { profileId?: string; person: Person; plan: PlanResult | null }) {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [asking, setAsking] = useState(false);
@@ -473,7 +573,7 @@ function AssistantView({ profileId, viewingLabel, plan }: { profileId?: string; 
     } finally { setAsking(false); }
   };
 
-  return <div className="page assistant-page"><section className="assistant-intro"><span className="assistant-mark"><Icon name="spark" /></span><p className="eyebrow">PROFILE-GROUNDED ASSISTANT</p><h1>{viewingLabel ? `Ask about ${viewingLabel}’s action plan.` : "Ask about your action plan."}</h1><p>Answers use your saved dates and checklist. This is a simple guide, not an AI chat or a legal eligibility assessment.</p><div className="assistant-status"><span className="coverage-dot" /><b>{plan?.stageLabel}</b><em>{plan?.coverage} module</em></div></section><section className="chat-card"><div className="chat-log" aria-live="polite">{!messages.length ? <div className="suggestion-grid">{suggestions.map((suggestion) => <button onClick={() => void ask(suggestion)} key={suggestion}>{suggestion}<Icon name="arrow" /></button>)}</div> : messages.map((message, index) => <div className={`message ${message.role}`} key={`${message.role}-${index}`}><span>{message.role === "assistant" ? <Icon name="spark" /> : "You"}</span><div><p>{message.text}</p>{message.sources?.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label} <Icon name="external" /></a>)}{message.limitations && <small>{message.limitations}</small>}</div></div>)}</div><form className="composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}><input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about your status, dates, or missing information…" aria-label="Ask ImmigrantOS" /><button disabled={asking || !question.trim()} aria-label="Send question">{asking ? <span className="spinner" /> : <Icon name="send" />}</button></form></section></div>;
+  return <div className="page assistant-page"><section className="assistant-intro"><span className="assistant-mark"><Icon name="spark" /></span><p className="eyebrow">CONNECT ASSISTANT</p><h1>Ask about {person.possessive} action plan</h1><p>Quick answers use {person.possessive} saved dates and checklist. This is a simple guide, not an AI chat or a legal eligibility assessment.</p><div className="assistant-status"><span className="coverage-dot" /><b>{plan?.stageLabel}</b><em>{plan?.coverage} module</em></div></section><section className="chat-card"><div className="chat-log" aria-live="polite">{!messages.length ? <div className="suggestion-grid">{suggestions.map((suggestion) => <button onClick={() => void ask(suggestion)} key={suggestion}>{suggestion}<Icon name="arrow" /></button>)}</div> : messages.map((message, index) => <div className={`message ${message.role}`} key={`${message.role}-${index}`}><span>{message.role === "assistant" ? <Icon name="spark" /> : "You"}</span><div><p>{message.text}</p>{message.sources?.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label} <Icon name="external" /></a>)}{message.limitations && <small>{message.limitations}</small>}</div></div>)}</div><form className="composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}><input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about your status, dates, or missing information…" aria-label="Ask ImmigrantOS" /><button disabled={asking || !question.trim()} aria-label="Send question">{asking ? <span className="spinner" /> : <Icon name="send" />}</button></form></section><AgentConnect /></div>;
 }
 
 function Onboarding({ mode = "initial", onCancel, onSaved }: { mode?: "initial" | "add"; onCancel?: () => void; onSaved: (createdProfileId?: string) => void }) {
@@ -534,9 +634,13 @@ function Brand({ mobile = false }: { mobile?: boolean }) { return <div className
 
 function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
-    plan: <><path d="M5 4h14v16H5z" /><path d="M8 9h8M8 13h5M8 17h7" /></>, file: <><path d="M6 2h8l4 4v16H6z" /><path d="M14 2v5h5" /></>, case: <><path d="M5 7h14v13H5zM9 7V4h6v3" /><path d="M5 12h14" /></>, spark: <><path d="m12 3 1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5z" /><path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z" /></>, shield: <><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z" /><path d="m9 12 2 2 4-5" /></>, chevron: <path d="m9 18 6-6-6-6" />, edit: <><path d="m4 20 4-.8L19 8.2 15.8 5 4.8 16z" /><path d="m14 6.8 3.2 3.2" /></>, print: <><path d="M7 9V3h10v6M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" /><path d="M7 14h10v7H7z" /></>, alert: <><path d="m12 3 10 18H2z" /><path d="M12 9v5M12 18h.01" /></>, arrow: <path d="m9 18 6-6-6-6" />, external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 13v7H4V6h7" /></>, check: <path d="m5 12 4 4L19 6" />, upload: <><path d="M12 16V4M7 9l5-5 5 5" /><path d="M4 15v5h16v-5" /></>, download: <><path d="M12 4v12M7 11l5 5 5-5" /><path d="M4 20h16" /></>, trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14" /><path d="M10 11v6M14 11v6" /></>, plus: <path d="M12 5v14M5 12h14" />, info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></>, send: <><path d="m3 3 18 9-18 9 4-9z" /><path d="M7 12h14" /></>, close: <path d="m6 6 12 12M18 6 6 18" />,
+    plan: <><path d="M5 4h14v16H5z" /><path d="M8 9h8M8 13h5M8 17h7" /></>, file: <><path d="M6 2h8l4 4v16H6z" /><path d="M14 2v5h5" /></>, case: <><path d="M5 7h14v13H5zM9 7V4h6v3" /><path d="M5 12h14" /></>, spark: <><path d="m12 3 1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5z" /><path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z" /></>, shield: <><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z" /><path d="m9 12 2 2 4-5" /></>, chevron: <path d="m9 18 6-6-6-6" />, edit: <><path d="m4 20 4-.8L19 8.2 15.8 5 4.8 16z" /><path d="m14 6.8 3.2 3.2" /></>, print: <><path d="M7 9V3h10v6M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" /><path d="M7 14h10v7H7z" /></>, alert: <><path d="m12 3 10 18H2z" /><path d="M12 9v5M12 18h.01" /></>, arrow: <path d="m9 18 6-6-6-6" />, external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 13v7H4V6h7" /></>, check: <path d="m5 12 4 4L19 6" />, upload: <><path d="M12 16V4M7 9l5-5 5 5" /><path d="M4 15v5h16v-5" /></>, download: <><path d="M12 4v12M7 11l5 5 5-5" /><path d="M4 20h16" /></>, trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14" /><path d="M10 11v6M14 11v6" /></>, plus: <path d="M12 5v14M5 12h14" />, info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></>, send: <><path d="m3 3 18 9-18 9 4-9z" /><path d="M7 12h14" /></>, close: <path d="m6 6 12 12M18 6 6 18" />, chevronDown: <path d="m6 9 6 6 6-6" />, users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5" /><path d="M15.5 4.8a3.3 3.3 0 0 1 0 6.4M18 14.8c2 .7 3.2 2.4 3.5 5.2" /></>, gear: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>, logout: <><path d="M10 4H5v16h5" /><path d="M14 8l4 4-4 4M18 12H9" /></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
+}
+
+class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); this.name = "ApiError"; }
 }
 
 async function api<T = { ok: boolean }>(url: string, options?: RequestInit): Promise<T> {
@@ -544,7 +648,7 @@ async function api<T = { ok: boolean }>(url: string, options?: RequestInit): Pro
   if (options?.body && !(options.body instanceof FormData)) headers.set("content-type", "application/json");
   const response = await fetch(url, { ...options, headers, cache: "no-store" });
   const payload = await response.json().catch(() => ({})) as T & { error?: string };
-  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status}).`);
+  if (!response.ok) throw new ApiError(payload.error || `Request failed (${response.status}).`, response.status);
   return payload;
 }
 
@@ -559,6 +663,17 @@ function stageDefaults(stage: LifecycleStage, displayName: string): ImmigrationP
 }
 function greeting() { const hour = new Date().getHours(); return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"; }
 function firstName(name: string) { return name.trim().split(/\s+/)[0] || "there"; }
+type Person = { name: string; possessive: string; possessiveCap: string; isSelf: boolean; named: boolean };
+// Who is on screen, for headings: "Mia’s documents", "Viewing Mia’s plan", or "Your documents"
+// for an unnamed primary profile.
+function personFor(item: ImmigrationProfile, idx: number): Person {
+  const named = item.displayName.trim();
+  const isSelf = !!item.isPrimary;
+  if (named) return { name: named, possessive: `${named}’s`, possessiveCap: `${named}’s`, isSelf, named: true };
+  if (isSelf) return { name: "your primary profile", possessive: "your", possessiveCap: "Your", isSelf, named: false };
+  const label = profileLabel(item, idx);
+  return { name: label, possessive: `${label}’s`, possessiveCap: `${label}’s`, isSelf, named: false };
+}
 function profileLabel(item: ImmigrationProfile, idx: number) { return item.displayName.trim() || (item.isPrimary ? "Primary profile" : `Profile ${idx + 1}`); }
 function initials(name: string) { return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "IO"; }
 function month(value: string) { return new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" }).format(new Date(`${value}T12:00:00Z`)).toUpperCase(); }
