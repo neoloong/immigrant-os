@@ -20,6 +20,7 @@ export const profiles = sqliteTable(
     greenCardSince: text("green_card_since"),
     greenCardExpirationDate: text("green_card_expiration_date"),
     naturalizationBasis: text("naturalization_basis").notNull().default("five_year"),
+    extensionRequestedUntil: text("extension_requested_until"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },

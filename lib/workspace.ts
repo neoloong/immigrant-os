@@ -3,6 +3,7 @@ import { ensureDatabase, getDb } from "../db";
 import { completedActions, documents, profiles, trackedCases } from "../db/schema";
 import { normalizeProfile, type ImmigrationProfile } from "./profile";
 import { buildPlan } from "./rules";
+import { buildExtensionHelper, extensionChecklistKeys, isIsoDate, validateRequestedUntil } from "./extension";
 import { getRuntimeBindings } from "./runtime-env";
 
 export class ProfileNotFound extends Error {
@@ -193,6 +194,48 @@ export async function loadPlan(owner: string, profileId?: string | null) {
   return buildPlan(profile as ImmigrationProfile, completed.map((row) => row.actionKey));
 }
 
+// Extension of stay (Form I-539) helper for VISITOR profiles. Checklist state
+// reuses completed_actions with keys of the form i539:<I-94 date>:<item>.
+export async function loadExtensionHelper(owner: string, profileId?: string | null, today?: string) {
+  const profile = await loadProfile(owner, profileId);
+  if (!profile) return null;
+  const completed = await getDb()
+    .select({ actionKey: completedActions.actionKey })
+    .from(completedActions)
+    .where(and(eq(completedActions.owner, owner), eq(completedActions.profileId, profile.id)));
+  return {
+    profileId: profile.id,
+    extension: buildExtensionHelper(profile, completed.map((row) => row.actionKey), today),
+  };
+}
+
+// Saves the user's chosen requested-until date; null clears it back to the
+// default (I-94 date + 6 months). Not part of saveProfile, so ordinary profile
+// edits never overwrite it.
+export async function setExtensionRequestedUntil(
+  owner: string,
+  requestedUntil: unknown,
+  profileId?: string | null,
+) {
+  const profile = await loadProfile(owner, profileId);
+  if (!profile) throw new ProfileNotFound();
+  if (profile.lifecycleStage !== "VISITOR") {
+    throw new Error("The extension helper is only available for visitor (B-1/B-2) profiles.");
+  }
+  if (!isIsoDate(profile.i94ExpirationDate)) {
+    throw new Error("Add the I-94 admit-until date to this profile first.");
+  }
+  const value =
+    requestedUntil === null || requestedUntil === ""
+      ? null
+      : validateRequestedUntil(profile.i94ExpirationDate, requestedUntil);
+  await getDb()
+    .update(profiles)
+    .set({ extensionRequestedUntil: value, updatedAt: new Date().toISOString() })
+    .where(and(eq(profiles.owner, owner), eq(profiles.id, profile.id)));
+  return loadExtensionHelper(owner, profile.id);
+}
+
 export async function setActionCompleted(
   owner: string,
   payload: { actionKey?: unknown; completed?: unknown },
@@ -205,7 +248,12 @@ export async function setActionCompleted(
   if (!actionKey) throw new Error("Action key is required.");
   const profile = await loadProfile(owner, profileId);
   if (!profile) throw new ProfileNotFound();
-  if (!buildPlan(profile as ImmigrationProfile).items.some((item) => item.id === actionKey)) {
+  const isPlanItem = buildPlan(profile as ImmigrationProfile).items.some((item) => item.id === actionKey);
+  const isExtensionItem =
+    profile.lifecycleStage === "VISITOR" &&
+    isIsoDate(profile.i94ExpirationDate) &&
+    extensionChecklistKeys(profile.i94ExpirationDate).includes(actionKey);
+  if (!isPlanItem && !isExtensionItem) {
     throw new Error("This action changed. Refresh your plan and try again.");
   }
   const db = getDb();

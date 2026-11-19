@@ -29,6 +29,7 @@ export function ensureDatabase() {
         green_card_since text,
         green_card_expiration_date text,
         naturalization_basis text DEFAULT 'five_year' NOT NULL,
+        extension_requested_until text,
         created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
         updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
       )`),

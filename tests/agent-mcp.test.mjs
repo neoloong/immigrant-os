@@ -11,7 +11,7 @@ import { accessFixture } from "./helpers/access.mjs";
 test("agent token lifecycle, MCP protocol, account isolation and compliance", async (t) => {
   const DB = sqliteD1();
   const env = { DB, BUCKET: {}, ASSETS: { fetch: () => new Response("Not found", { status: 404 }) }, AGENT_MCP_ENABLED: "true" };
-  for (const name of ["0000_new_maria_hill", "0001_round_ted_forrester", "0002_agent_tokens", "0003_family_profiles"]) DB.exec(await readFile(new URL(`../drizzle/${name}.sql`, import.meta.url), "utf8"));
+  for (const name of ["0000_new_maria_hill", "0001_round_ted_forrester", "0002_agent_tokens", "0003_family_profiles", "0004_extension_requested_until"]) DB.exec(await readFile(new URL(`../drizzle/${name}.sql`, import.meta.url), "utf8"));
   const ctx = { waitUntil() {}, passThroughOnException() {} };
   const a = "agent-a@example.test", b = "agent-b@example.test";
   const web = (owner, path, method = "GET", body, headers = {}, overrides = {}) => worker.fetch(new Request(`https://test.local${path}`, {
