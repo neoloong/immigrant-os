@@ -2,6 +2,8 @@
 
 ## Active assignments
 
+- 2026-11-21 broad-source audit — `broad-source-audit` at `polish-1` (`acc9251`); Codex sole writer for `docs/broad-source-audit.md` and this registration line; assignment cleared. Six items audited, exact proposed fixes recorded; no product changes. Cached `npm ci` and `npx tsc --noEmit` passed; `npm test`: 54 pass / 3 listener-EPERM failures, required 74-pass acceptance blocked. USCIS 403s and unavailable HTTP statuses remain UNVERIFIED. Uncommitted: `.git/index.lock` denied. Requested `/Users/chao/broad-source.summary.md` write denied; summary saved to `/private/tmp/broad-source.summary.md`. No push, merge, deploy, or audience change.
+
 None. Agent MCP implementation and available local validation are complete; operator Miniflare, UI/connector smoke checks and activation remain below.
 
 ## Public landing page (2026-11-16)
