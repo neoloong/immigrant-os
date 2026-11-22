@@ -10,6 +10,7 @@ None. Agent MCP implementation and available local validation are complete; oper
 - Session mode: GET/HEAD `/` without a valid Access identity now returns a static landing page (`lib/public-pages.ts`) instead of 401 JSON. Signed-in behavior (bootstrap redirect, app render, owner checks) is unchanged; every other path still returns 401 without a valid identity. Added public `/privacy`; `/agents` and `/llms.txt` were already public at the Worker. Dispatch (Sites) mode is unchanged.
 - The request-access mailto (`neoloong@gmail.com`) needs owner confirmation. The Access-side change and its open root-path question are in `~/landing.summary.md`.
 - `npm ci`, `npx tsc --noEmit`, eslint on changed files and `npm test` (55/55, Miniflare suites included) passed. Pushed branch only; no merge, deploy or Access change.
+- 2026-11-22: ported onto production `polish-1` `acc9251` as branch `landing-on-polish` (worktree `~/Projects/immigrant-os-landing2`), because `landing-page` is behind `polish-1`. The feature diff applied without textual conflicts; the landing test fixture now also loads migration `0004_extension_requested_until`. `npm test` 82/82 (74 polish-1 + 8 landing), tsc clean, lint 0 errors. Not merged or deployed. Details in `~/landing2.summary.md`.
 
 ## Agent-native MCP layer (2026-11-09)
 

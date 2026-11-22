@@ -15,7 +15,7 @@ test("public landing, privacy and agent guide; app and data stay behind the sess
   const access = accessFixture(t);
   const errors = t.mock.method(console, "error", () => {});
   const DB = sqliteD1();
-  for (const name of ["0000_new_maria_hill", "0001_round_ted_forrester", "0002_agent_tokens", "0003_family_profiles"]) DB.exec(await readFile(new URL(`../drizzle/${name}.sql`, import.meta.url), "utf8"));
+  for (const name of ["0000_new_maria_hill", "0001_round_ted_forrester", "0002_agent_tokens", "0003_family_profiles", "0004_extension_requested_until"]) DB.exec(await readFile(new URL(`../drizzle/${name}.sql`, import.meta.url), "utf8"));
   const env = {
     ...access.env, AUTH_MODE: "session", SESSION_SECRET: secret, AGENT_MCP_ENABLED: "true", DB, BUCKET: {},
     ASSETS: { fetch: () => new Response("Not found", { status: 404 }) },
