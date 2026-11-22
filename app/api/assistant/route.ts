@@ -34,13 +34,13 @@ export async function POST(request: Request) {
     const normalized = question.toLowerCase();
     let relevant = plan.items.filter((item) => !item.completed).slice(0, 3);
 
-    if (/opt|stem|ead/.test(normalized)) relevant = plan.items.filter((item) => /opt|ead/.test(item.id));
+    if (/opt|stem|ead/.test(normalized)) relevant = plan.items.filter((item) => /^(?:f1-program-end|f1-i94-end|ead-expiry):/.test(item.id));
     else if (/i-?94|status|expire|expiration/.test(normalized)) {
       relevant = plan.items.filter((item) => /i94|passport|expiry|end/.test(item.id));
     } else if (/citizen|n-?400|naturaliz/.test(normalized)) {
       relevant = plan.items.filter((item) => item.id.includes("n400"));
     } else if (/green card|i-?90|renew/.test(normalized)) {
-      relevant = plan.items.filter((item) => /i90|gc-/.test(item.id));
+      relevant = plan.items.filter((item) => /^(?:gc-visa-bulletin|gc-case-receipts|lpr-card-expiry):/.test(item.id));
     } else if (/missing|document|upload/.test(normalized)) relevant = [];
 
     const answer = relevant.length
