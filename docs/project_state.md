@@ -2,6 +2,8 @@
 
 ## Active assignments
 
+- 2026-11-22 assistant routing fix (broad-source audit item 6) — `routing-fix` from `broad-source-audit` (`63d1d84`); Claude Code sole writer for `app/api/assistant/route.ts`, `tests/assistant-routing.test.mjs` and this line; assignment cleared. OPT and green-card branch filters replaced with the audit's exact explicit-ID predicates; triggers, branch order, reply templates and `lib/rules.ts` unchanged; no new user-facing wording. New built-Worker regression test (3 results) fails on old predicates (fallback reply) and passes on new. `npm test`: 77/77 pass (baseline 74); `npx tsc --noEmit` exit 0. No push, merge, deploy, or audience change.
+
 - 2026-11-21 broad-source audit — `broad-source-audit` at `polish-1` (`acc9251`); Codex sole writer for `docs/broad-source-audit.md` and this registration line; assignment cleared. Six items audited, exact proposed fixes recorded; no product changes. Cached `npm ci` and `npx tsc --noEmit` passed; `npm test`: 54 pass / 3 listener-EPERM failures, required 74-pass acceptance blocked. USCIS 403s and unavailable HTTP statuses remain UNVERIFIED. Uncommitted: `.git/index.lock` denied. Requested `/Users/chao/broad-source.summary.md` write denied; summary saved to `/private/tmp/broad-source.summary.md`. No push, merge, deploy, or audience change.
 
 None. Agent MCP implementation and available local validation are complete; operator Miniflare, UI/connector smoke checks and activation remain below.
