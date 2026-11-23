@@ -69,9 +69,9 @@ const SOURCES = {
     ruleVersion: "Official reference · check current instructions",
   },
   passport: {
-    label: "Department of State: Visitor Visa & Passport Validity",
+    label: "Department of State: U.S. visitor visas (background only)",
     url: "https://travel.state.gov/content/travel/en/us-visas/tourism-visit/visitor.html",
-    ruleVersion: "Official reference · check current instructions",
+    ruleVersion: "Not passport-renewal guidance",
   },
 };
 
@@ -218,8 +218,8 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
   if (profile.passportExpirationDate) {
     add({
       id: "universal-passport-expiry",
-      title: "Passport expires",
-      description: "Renewal timing and the effect on travel or admission can vary by country and status. Plan early and re-check travel documents before every trip.",
+      title: "Saved passport expiration date",
+      description: "This is the passport-expiration date you entered. Review renewal information from your passport's issuing authority and check your travel documents before a trip. This tracker does not check renewal or admission requirements. The linked Department of State page is background information for U.S. visitor visas only.",
       dueDate: profile.passportExpirationDate,
       severity: "important",
       confidence: "needs-review",
