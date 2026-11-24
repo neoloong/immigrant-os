@@ -1,5 +1,6 @@
-import { getAuthConfig, issueSession, ownerFromRequest, revokeSession, sessionCookieFromRequest } from "./auth";
+import { getAuthConfig, issueSession, ownerFromRequest, ownerFromSessionCookie, revokeSession, sessionCookieFromRequest } from "./auth";
 import { accessConfig, verifyAccessIdentityDetailed, type AccessEnv } from "./access-jwt";
+import { handleBrandedLoginCode, handleBrandedLoginPage, handleBrandedLoginVerify, LOGIN_CODE_PATH, LOGIN_VERIFY_PATH, type BrandedLoginEnv } from "./branded-login";
 import { landingPage, publicPageResponse } from "./public-pages";
 
 const PRIVATE_HEADERS = { "cache-control": "private, no-store" };
@@ -14,13 +15,33 @@ function error(message: string, status: number): Response {
   return Response.json({ error: message }, { status, headers: PRIVATE_HEADERS });
 }
 
+function hasAccessToken(request: Request): boolean {
+  if (request.headers.get("Cf-Access-Jwt-Assertion")) return true;
+  return (request.headers.get("cookie") ?? "").split(";").some((part) => part.split("=")[0]?.trim() === "CF_Authorization");
+}
+
 // Called before routing, including API and image requests. Returning null allows
-// a request through only after Access and the app session identify the same owner.
-export async function handleAccessAuth(request: Request, env: AccessEnv): Promise<Response | null> {
+// a request through only after Access and the app session identify the same owner
+// (or, when brandedLoginEnabled is on, after validating the app session cookie).
+export async function handleAccessAuth(request: Request, env: AccessEnv & BrandedLoginEnv): Promise<Response | null> {
   const url = new URL(request.url);
   const auth = getAuthConfig();
   if (url.pathname === "/auth/login") {
+    if (auth.authMode === "session" && auth.brandedLoginEnabled) {
+      if (!auth.sessionSecret) return error("Sign-in is not configured.", 503);
+      return handleBrandedLoginPage(request);
+    }
     return redirect(auth.authMode === "session" ? "/auth/access" : "/signin-with-chatgpt?return_to=%2F");
+  }
+  if (auth.authMode === "session" && auth.brandedLoginEnabled) {
+    if (url.pathname === LOGIN_CODE_PATH) {
+      if (!auth.sessionSecret) return error("Sign-in is not configured.", 503);
+      return handleBrandedLoginCode(request, env, auth.sessionSecret);
+    }
+    if (url.pathname === LOGIN_VERIFY_PATH) {
+      if (!auth.sessionSecret) return error("Sign-in is not configured.", 503);
+      return handleBrandedLoginVerify(request, auth.sessionSecret);
+    }
   }
   if (url.pathname === "/auth/logout") {
     if (request.method !== "POST") return new Response(null, { status: 405, headers: { ...PRIVATE_HEADERS, allow: "POST" } });
@@ -29,12 +50,27 @@ export async function handleAccessAuth(request: Request, env: AccessEnv): Promis
     if (auth.authMode !== "session") return redirect("/signout-with-chatgpt?return_to=%2F");
     const cookie = sessionCookieFromRequest(request);
     if (cookie) await revokeSession(cookie);
-    return redirect("/cdn-cgi/access/logout", `${auth.sessionCookieName}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`);
+    const clearCookie = `${auth.sessionCookieName}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+    const logoutTarget = auth.brandedLoginEnabled && (!accessConfig(env) || !hasAccessToken(request)) ? "/" : "/cdn-cgi/access/logout";
+    return redirect(logoutTarget, clearCookie);
   }
   if (auth.authMode !== "session") {
     return url.pathname === "/auth/access" ? error("Access sign-in is disabled.", 503) : null;
   }
   const config = accessConfig(env);
+  if (auth.brandedLoginEnabled) {
+    if (!auth.sessionSecret) return error("Sign-in is not configured.", 503);
+    if (url.pathname !== "/auth/access") {
+      const sessionOwner = await ownerFromSessionCookie(request, auth);
+      if (sessionOwner) return null;
+      if (!config) {
+        if (url.pathname === "/" && (request.method === "GET" || request.method === "HEAD")) {
+          return publicPageResponse(request, landingPage());
+        }
+        return error("Sign in to access your immigration workspace.", 401);
+      }
+    }
+  }
   if (!config || !auth.sessionSecret) return error("Access sign-in is not configured.", 503);
   if (url.pathname === "/auth/access" && request.method !== "GET") {
     return new Response(null, { status: 405, headers: { ...PRIVATE_HEADERS, allow: "GET" } });

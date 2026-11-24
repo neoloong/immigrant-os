@@ -19,9 +19,30 @@ export const PUBLIC_PAGE_HEADERS: Record<string, string> = {
   "referrer-policy": "no-referrer",
 };
 
+export const LOGIN_PAGE_HEADERS: Record<string, string> = {
+  ...PUBLIC_PAGE_HEADERS,
+  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+};
+
 export function publicPageResponse(request: Request, html: string): Response {
   if (!["GET", "HEAD"].includes(request.method)) return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
   return new Response(request.method === "HEAD" ? null : html, { headers: PUBLIC_PAGE_HEADERS });
+}
+
+export function loginPageResponse(request: Request, html: string, status = 200, extraHeaders?: Record<string, string>): Response {
+  return new Response(request.method === "HEAD" ? null : html, {
+    status,
+    headers: { ...LOGIN_PAGE_HEADERS, ...extraHeaders },
+  });
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 const STYLE = `
@@ -48,6 +69,17 @@ section{padding:36px 0}h2{font-size:1.6rem;letter-spacing:-.5px;margin:0 0 18px}
 .boundaries{background:var(--cream);border:1px solid #e6dcc8;border-radius:16px;padding:26px 28px}
 .boundaries ul{margin:0;padding-left:20px}.boundaries li{margin:.45em 0}
 .prose{max-width:760px;padding:56px 0}.prose h1{font-size:2.4rem}.prose h2{font-size:1.25rem;margin-top:2rem}.prose li{margin:.4em 0}
+.login-shell{max-width:540px;margin:0 auto;padding:56px 0 24px}.login-shell h1{font-size:clamp(1.85rem,4vw,2.35rem);margin:0 0 12px}.login-shell .lead{font-size:1.02rem;margin:0 0 22px}
+.login-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:28px;box-shadow:0 18px 55px rgba(26,43,35,.06);margin-bottom:24px}
+.field{margin-bottom:16px}.field label{display:block;font-size:.92rem;font-weight:650;margin-bottom:6px;color:var(--ink)}
+.field input{width:100%;font:inherit;font-size:16px;padding:12px 14px;border:1px solid #cbd7cd;border-radius:10px;background:#fff;color:var(--ink)}
+.field input:focus{outline:3px solid var(--green-2);outline-offset:1px;border-color:var(--green)}
+.code-input{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.4rem;letter-spacing:.35em;text-align:center}
+.btn-submit{width:100%;border:0;cursor:pointer;font:inherit;font-weight:650;background:var(--green);color:#fff;padding:13px 20px;border-radius:11px}
+.btn-submit:hover{background:var(--green-2)}.btn-submit:focus-visible{outline:3px solid var(--green-2);outline-offset:3px}
+.notice{background:var(--green-soft);border:1px solid #c3dbce;color:var(--ink);border-radius:12px;padding:13px 15px;font-size:.95rem;margin-bottom:18px}
+.alert-error{background:#fdf1ed;border:1px solid #eabfb0;color:#7a2e14;border-radius:12px;padding:13px 15px;font-size:.95rem;margin-bottom:18px}
+.login-links{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;margin-top:16px;font-size:.92rem;color:var(--muted)}
 footer{border-top:1px solid var(--line);margin-top:40px;padding:26px 0 40px;color:var(--muted);font-size:14px}
 footer .wrap{display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between}footer nav{display:flex;gap:18px}
 @media(max-width:600px){body{font-size:16px}.hero{padding:44px 0 28px}.boundaries{padding:20px}}
@@ -126,4 +158,49 @@ export function privacyPage(): string {
 <p>You can delete uploaded documents in the app at any time. To delete your account and all of its data, email <a href="${DELETION_REQUEST_HREF}">${ACCESS_REQUEST_EMAIL}</a> from the address you sign in with.</p>
 <p><a href="/">Back to Immigrant OS</a></p>
 </main>`, "A private, invite-only tracker for your and your family's US immigration dates and documents.");
+}
+
+export type BrandedLoginPageOptions = {
+  step?: "email" | "verify";
+  email?: string;
+  notice?: string;
+  error?: string;
+};
+
+export function brandedLoginPage(options: BrandedLoginPageOptions = {}): string {
+  const step = options.step === "verify" ? "verify" : "email";
+  const safeEmail = options.email ? escapeHtml(options.email) : "";
+  const noticeHtml = options.notice ? `<div class="notice" role="status">${escapeHtml(options.notice)}</div>` : "";
+  const errorHtml = options.error ? `<div class="alert-error" role="alert">${escapeHtml(options.error)}</div>` : "";
+
+  const formHtml = step === "verify"
+    ? `<form method="post" action="/auth/login/verify">
+<div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" autocomplete="email" value="${safeEmail}" placeholder="you@example.com" required></div>
+<div class="field"><label for="code">6-digit sign-in code</label><input id="code" name="code" class="code-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" required autofocus></div>
+<button class="btn-submit" type="submit">Verify and sign in</button>
+</form>
+<div class="login-links"><a href="/auth/login">Request a new code</a><a href="${ACCESS_REQUEST_HREF}">Need an invite?</a></div>`
+    : `<form method="post" action="/auth/login/code">
+<div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" autocomplete="email" value="${safeEmail}" placeholder="you@example.com" required autofocus></div>
+<button class="btn-submit" type="submit">Send sign-in code</button>
+</form>
+<div class="login-links"><a href="/auth/login?step=verify">Already have a code?</a><a href="${ACCESS_REQUEST_HREF}">Request access</a></div>`;
+
+  return page("Sign in · Immigrant OS", `<main class="wrap"><div class="login-shell">
+<p class="eyebrow">Invite-only beta</p>
+<h1>Sign in to Immigrant OS</h1>
+<p class="lead">${step === "verify"
+  ? "Enter the 6-digit code sent to your email address. Codes expire after 10 minutes."
+  : "Enter your invited email address and we will send a one-time 6-digit sign-in code."}</p>
+<div class="login-card">
+${noticeHtml}${errorHtml}${formHtml}
+</div>
+<div class="boundaries">
+<ul>
+<li><strong>Invite-only beta.</strong> Access is by invitation while the product is being tested.</li>
+<li><strong>Not a law firm.</strong> Immigrant OS is not a law firm and is not affiliated with USCIS or any government agency.</li>
+<li><strong>No legal advice.</strong> Nothing in the app is legal advice. For questions about your case, talk to a qualified immigration attorney.</li>
+</ul>
+</div>
+</div></main>`, "Sign in to Immigrant OS with a one-time email sign-in code.");
 }

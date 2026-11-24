@@ -7,9 +7,10 @@ import { handleMcp } from "../lib/mcp";
 import { handleAgentTokens } from "../lib/agent-tokens";
 import { agentDiscovery, agentGuide } from "../lib/agent-onboarding";
 import type { AccessEnv } from "../lib/access-jwt";
+import type { BrandedLoginEnv } from "../lib/branded-login";
 import { privacyPage, publicPageResponse } from "../lib/public-pages";
 
-interface Env extends AccessEnv {
+interface Env extends AccessEnv, BrandedLoginEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DB: D1BindingLike;
   BUCKET: R2BindingLike;
@@ -42,8 +43,12 @@ const worker = {
       __IMMIGRANT_SITE_BINDINGS__?: Pick<Env, "DB" | "BUCKET">;
     }).__IMMIGRANT_SITE_BINDINGS__ = { DB: env.DB, BUCKET: env.BUCKET };
     (globalThis as typeof globalThis & {
-      __IMMIGRANT_AUTH_CONFIG__?: { authMode?: string; sessionSecret?: string };
-    }).__IMMIGRANT_AUTH_CONFIG__ = { authMode: env.AUTH_MODE, sessionSecret: env.SESSION_SECRET };
+      __IMMIGRANT_AUTH_CONFIG__?: { authMode?: string; sessionSecret?: string; brandedLoginEnabled?: boolean };
+    }).__IMMIGRANT_AUTH_CONFIG__ = {
+      authMode: env.AUTH_MODE,
+      sessionSecret: env.SESSION_SECRET,
+      brandedLoginEnabled: env.BRANDED_LOGIN_ENABLED === "true",
+    };
     const url = new URL(request.url);
 
     // Only these exact routes (plus the anonymous `/` landing page served from

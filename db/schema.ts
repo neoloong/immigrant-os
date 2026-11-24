@@ -119,3 +119,19 @@ export const agentTokens = sqliteTable("agent_tokens", {
   uniqueIndex("agent_tokens_hash_idx").on(table.tokenHash),
   index("agent_tokens_owner_idx").on(table.owner),
 ]);
+
+export const loginCodes = sqliteTable(
+  "login_codes",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("login_codes_email_idx").on(table.email),
+    index("login_codes_expires_at_idx").on(table.expiresAt),
+  ],
+);

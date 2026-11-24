@@ -12,11 +12,13 @@ export type AuthConfig = {
   sessionSecret: string | null;
   sessionCookieName: string;
   sessionTtlSeconds: number;
+  brandedLoginEnabled: boolean;
 };
 
 type InjectedAuthConfig = {
   authMode?: string;
   sessionSecret?: string;
+  brandedLoginEnabled?: boolean | string;
 };
 
 export function getAuthConfig(): AuthConfig {
@@ -25,11 +27,13 @@ export function getAuthConfig(): AuthConfig {
   }).__IMMIGRANT_AUTH_CONFIG__;
   const authMode = injected?.authMode ?? import.meta.env.VITE_AUTH_MODE ?? "dispatch";
   const sessionSecret = injected?.sessionSecret ?? import.meta.env.VITE_SESSION_SECRET ?? null;
+  const brandedLoginRaw = injected?.brandedLoginEnabled ?? import.meta.env.VITE_BRANDED_LOGIN_ENABLED;
   return {
     authMode: authMode === "session" ? "session" : "dispatch",
     sessionSecret: typeof sessionSecret === "string" && sessionSecret.length >= 32 ? sessionSecret : null,
     sessionCookieName: SESSION_COOKIE_NAME,
     sessionTtlSeconds: SESSION_TTL_SECONDS,
+    brandedLoginEnabled: brandedLoginRaw === true || brandedLoginRaw === "true",
   };
 }
 
@@ -80,7 +84,7 @@ export function sessionCookieFromRequest(request: Request): string | null {
   return readCookie(request, getAuthConfig().sessionCookieName);
 }
 
-async function ownerFromSessionCookie(request: Request, config: AuthConfig): Promise<string | null> {
+export async function ownerFromSessionCookie(request: Request, config: AuthConfig = getAuthConfig()): Promise<string | null> {
   if (!config.sessionSecret) return null;
   const cookieValue = readCookie(request, config.sessionCookieName);
   if (!cookieValue) return null;
@@ -123,7 +127,7 @@ async function verifySessionValue(value: string, secret: string): Promise<string
   return id;
 }
 
-async function hmacSha256(secret: string, message: string): Promise<Uint8Array> {
+export async function hmacSha256(secret: string, message: string): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
@@ -135,7 +139,7 @@ async function hmacSha256(secret: string, message: string): Promise<Uint8Array> 
   return new Uint8Array(signature);
 }
 
-function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
+export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];

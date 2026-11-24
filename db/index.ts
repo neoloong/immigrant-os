@@ -1,15 +1,16 @@
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema";
-import { getRuntimeBindings } from "../lib/runtime-env";
+import { getRuntimeBindings, type D1BindingLike } from "../lib/runtime-env";
 
 export function getDb() {
   return drizzle(getRuntimeBindings().DB as Parameters<typeof drizzle>[0], { schema });
 }
 
-let initialization: Promise<void> | null = null;
+const initializations = new WeakMap<D1BindingLike, Promise<void>>();
 
 export function ensureDatabase() {
   const d1 = getRuntimeBindings().DB;
+  let initialization = initializations.get(d1);
   if (!initialization) {
     initialization = d1.batch([
       d1.prepare(`CREATE TABLE IF NOT EXISTS profiles (
@@ -86,10 +87,21 @@ export function ensureDatabase() {
       )`),
       d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS agent_tokens_hash_idx ON agent_tokens (token_hash)"),
       d1.prepare("CREATE INDEX IF NOT EXISTS agent_tokens_owner_idx ON agent_tokens (owner)"),
+      d1.prepare(`CREATE TABLE IF NOT EXISTS login_codes (
+        id text PRIMARY KEY NOT NULL,
+        email text NOT NULL,
+        code_hash text NOT NULL,
+        expires_at text NOT NULL,
+        attempts integer DEFAULT 0 NOT NULL,
+        created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+      )`),
+      d1.prepare("CREATE INDEX IF NOT EXISTS login_codes_email_idx ON login_codes (email)"),
+      d1.prepare("CREATE INDEX IF NOT EXISTS login_codes_expires_at_idx ON login_codes (expires_at)"),
     ]).then(() => undefined).catch((error: unknown) => {
-      initialization = null;
+      initializations.delete(d1);
       throw error;
     });
+    initializations.set(d1, initialization);
   }
   return initialization;
 }
