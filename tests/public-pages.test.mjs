@@ -80,6 +80,13 @@ test("public landing, privacy and agent guide; app and data stay behind the sess
     assert.match(anonymousHtml, /Use with your AI agent/);
     assert.match(anonymousHtml, /https:\/\/app\.example\.test\/mcp/);
     assert.doesNotMatch(anonymousHtml, /SecretNickname|owner@example\.test|ios_[a-f0-9]{64}/);
+    // The public tool lists must match the live MCP tools/list (10 tools,
+    // get_calendar_export is read scope; set_action_completed is write scope).
+    const toolNames = ["list_profiles", "get_profile", "get_action_plan", "get_calendar_export", "get_extension_helper", "list_documents", "list_cases", "update_profile_dates", "set_action_completed", "add_case"];
+    for (const name of toolNames) assert.ok(anonymousHtml.includes(name), `/agents missing ${name}`);
+    for (const phrase of [/Invite-only beta/, /Not a law firm/, /not affiliated with USCIS/, /href="\/auth\/login"/, /href="\/privacy"/, /Immigrant%20OS%20access%20request/]) assert.match(anonymousHtml, phrase);
+    const llms = await (await call("/llms.txt")).text();
+    for (const name of toolNames) assert.ok(llms.includes(name), `/llms.txt missing ${name}`);
     assert.equal(await (await call("/agents", signedIn)).text(), anonymousHtml);
   });
 
@@ -91,6 +98,8 @@ test("public landing, privacy and agent guide; app and data stay behind the sess
       const html = await response.text();
       for (const phrase of [/Privacy note/, /never sold/, /no advertising trackers/, /Cloudflare/, /not legal advice|does not give legal advice/, /mailto:neoloong@gmail\.com/]) assert.match(html, phrase);
       assert.doesNotMatch(html, /SecretNickname|owner@example\.test|<script/);
+      // The privacy meta description must not promise unconditional "deadlines".
+      assert.doesNotMatch(html, /dates, deadlines and documents/);
     }
     assert.equal((await call("/privacy", {}, "POST")).status, 405);
   });

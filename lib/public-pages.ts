@@ -53,8 +53,8 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between}
 @media(max-width:600px){body{font-size:16px}.hero{padding:44px 0 28px}.boundaries{padding:20px}}
 `;
 
-function page(title: string, body: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="theme-color" content="#f8f7f3"><title>${title}</title><meta name="description" content="A private, invite-only tracker for your and your family's US immigration dates, deadlines and documents."><style>${STYLE}</style></head><body>
+function page(title: string, body: string, description = "A private, invite-only tracker for your and your family's US immigration dates, deadlines and documents."): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="theme-color" content="#f8f7f3"><title>${title}</title><meta name="description" content="${description}"><style>${STYLE}</style></head><body>
 <header><div class="wrap"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">I</span>Immigrant OS</a><a class="signin" href="${SIGN_IN_HREF}">Sign in</a></div></header>
 ${body}
 <footer><div class="wrap"><span>Immigrant OS · Invite-only beta · Not a law firm · No legal advice</span><nav aria-label="Footer"><a href="/privacy">Privacy</a><a href="/agents">Connect an AI agent</a><a href="${ACCESS_REQUEST_HREF}">Request access</a></nav></div></footer>
@@ -125,5 +125,5 @@ export function privacyPage(): string {
 <h2>Deleting your data</h2>
 <p>You can delete uploaded documents in the app at any time. To delete your account and all of its data, email <a href="${DELETION_REQUEST_HREF}">${ACCESS_REQUEST_EMAIL}</a> from the address you sign in with.</p>
 <p><a href="/">Back to Immigrant OS</a></p>
-</main>`);
+</main>`, "A private, invite-only tracker for your and your family's US immigration dates and documents.");
 }
