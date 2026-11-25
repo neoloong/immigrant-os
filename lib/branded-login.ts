@@ -1,9 +1,14 @@
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { ensureDatabase, getDb } from "../db";
 import { loginCodes, profiles } from "../db/schema";
-import { hmacSha256, issueSession, revokeSession, sessionCookieFromRequest, timingSafeEqual } from "./auth";
+import { getAuthConfig, hmacSha256, issueSession, revokeSession, sessionCookieFromRequest, timingSafeEqual } from "./auth";
 import { createMailer, isMailerConfigured, type MailerEnv } from "./mailer";
-import { brandedLoginPage, loginPageResponse } from "./public-pages";
+import {
+  brandedLoginPage,
+  GOOGLE_LOGIN_ERROR_CODE,
+  loginPageResponse,
+  UNIFORM_GOOGLE_LOGIN_ERROR,
+} from "./public-pages";
 
 export type BrandedLoginEnv = MailerEnv & {
   BRANDED_LOGIN_ENABLED?: string;
@@ -121,7 +126,7 @@ export async function hashLoginCode(secret: string, id: string, email: string, c
   return bytesToHex(digest);
 }
 
-async function isEmailEligible(email: string, allowlistRaw?: string): Promise<boolean> {
+export async function isEmailEligible(email: string, allowlistRaw?: string): Promise<boolean> {
   if (parseAllowlist(allowlistRaw).has(email)) return true;
   await ensureDatabase();
   const [profile] = await getDb()
@@ -171,9 +176,13 @@ export function handleBrandedLoginPage(request: Request): Response {
   if (!["GET", "HEAD"].includes(request.method)) {
     return new Response(null, { status: 405, headers: { ...PRIVATE_HEADERS, allow: "GET, HEAD" } });
   }
+  const auth = getAuthConfig();
   const url = new URL(request.url);
   const step = url.searchParams.get("step") === "verify" ? "verify" : "email";
-  return loginPageResponse(request, brandedLoginPage({ step }));
+  const error = auth.googleLoginEnabled && url.searchParams.get("error") === GOOGLE_LOGIN_ERROR_CODE
+    ? UNIFORM_GOOGLE_LOGIN_ERROR
+    : undefined;
+  return loginPageResponse(request, brandedLoginPage({ step, error, googleLogin: auth.googleLoginEnabled }));
 }
 
 export async function handleBrandedLoginCode(
@@ -187,11 +196,12 @@ export async function handleBrandedLoginCode(
   if (isCrossSite(request)) {
     return jsonResponse({ error: "Invalid request origin." }, 403);
   }
+  const googleLogin = getAuthConfig().googleLoginEnabled;
   const payload = await parseRequestPayload(request);
   if (!payload.ok) {
     return payload.isJson
       ? jsonResponse({ error: payload.message }, payload.status)
-      : loginPageResponse(request, brandedLoginPage({ step: "email", error: payload.message }), payload.status);
+      : loginPageResponse(request, brandedLoginPage({ step: "email", error: payload.message, googleLogin }), payload.status);
   }
 
   // Check mailer readiness before inspecting any email so misconfiguration fails closed uniformly.
@@ -199,7 +209,7 @@ export async function handleBrandedLoginCode(
     const message = "Sign-in email delivery is not configured.";
     return payload.isJson
       ? jsonResponse({ error: message }, 503)
-      : loginPageResponse(request, brandedLoginPage({ step: "email", error: message }), 503);
+      : loginPageResponse(request, brandedLoginPage({ step: "email", error: message, googleLogin }), 503);
   }
 
   const ipLimit = consumeRateLimit(ipCodeWindows, clientIp(request), IP_CODE_LIMIT);
@@ -208,7 +218,7 @@ export async function handleBrandedLoginCode(
     const retryHeader = { "retry-after": String(ipLimit.retryAfterSeconds) };
     return payload.isJson
       ? jsonResponse({ error: message }, 429, retryHeader)
-      : loginPageResponse(request, brandedLoginPage({ step: "email", error: message }), 429, retryHeader);
+      : loginPageResponse(request, brandedLoginPage({ step: "email", error: message, googleLogin }), 429, retryHeader);
   }
 
   const email = normalizeEmail(payload.data.email);
@@ -216,7 +226,7 @@ export async function handleBrandedLoginCode(
     const message = "Please enter a valid email address.";
     return payload.isJson
       ? jsonResponse({ error: message }, 400)
-      : loginPageResponse(request, brandedLoginPage({ step: "email", error: message }), 400);
+      : loginPageResponse(request, brandedLoginPage({ step: "email", error: message, googleLogin }), 400);
   }
 
   // Track per-email rate limit before checking eligibility so throttling cannot enumerate emails.
@@ -257,7 +267,7 @@ export async function handleBrandedLoginCode(
   }
   return loginPageResponse(
     request,
-    brandedLoginPage({ step: "verify", email, notice: UNIFORM_CODE_SENT_MESSAGE }),
+    brandedLoginPage({ step: "verify", email, notice: UNIFORM_CODE_SENT_MESSAGE, googleLogin }),
     200,
   );
 }
@@ -272,11 +282,12 @@ export async function handleBrandedLoginVerify(
   if (isCrossSite(request)) {
     return jsonResponse({ error: "Invalid request origin." }, 403);
   }
+  const googleLogin = getAuthConfig().googleLoginEnabled;
   const payload = await parseRequestPayload(request);
   if (!payload.ok) {
     return payload.isJson
       ? jsonResponse({ error: payload.message }, payload.status)
-      : loginPageResponse(request, brandedLoginPage({ step: "verify", error: payload.message }), payload.status);
+      : loginPageResponse(request, brandedLoginPage({ step: "verify", error: payload.message, googleLogin }), payload.status);
   }
 
   const ipLimit = consumeRateLimit(ipVerifyWindows, clientIp(request), IP_VERIFY_LIMIT);
@@ -285,7 +296,7 @@ export async function handleBrandedLoginVerify(
     const retryHeader = { "retry-after": String(ipLimit.retryAfterSeconds) };
     return payload.isJson
       ? jsonResponse({ error: message }, 429, retryHeader)
-      : loginPageResponse(request, brandedLoginPage({ step: "verify", email: payload.data.email ?? "", error: message }), 429, retryHeader);
+      : loginPageResponse(request, brandedLoginPage({ step: "verify", email: payload.data.email ?? "", error: message, googleLogin }), 429, retryHeader);
   }
 
   const fail = (submittedEmail?: string) =>
@@ -293,7 +304,7 @@ export async function handleBrandedLoginVerify(
       ? jsonResponse({ error: UNIFORM_VERIFY_ERROR }, 401)
       : loginPageResponse(
           request,
-          brandedLoginPage({ step: "verify", email: submittedEmail, error: UNIFORM_VERIFY_ERROR }),
+          brandedLoginPage({ step: "verify", email: submittedEmail, error: UNIFORM_VERIFY_ERROR, googleLogin }),
           401,
         );
 

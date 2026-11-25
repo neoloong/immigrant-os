@@ -1,6 +1,13 @@
 import { getAuthConfig, issueSession, ownerFromRequest, ownerFromSessionCookie, revokeSession, sessionCookieFromRequest } from "./auth";
 import { accessConfig, verifyAccessIdentityDetailed, type AccessEnv } from "./access-jwt";
 import { handleBrandedLoginCode, handleBrandedLoginPage, handleBrandedLoginVerify, LOGIN_CODE_PATH, LOGIN_VERIFY_PATH, type BrandedLoginEnv } from "./branded-login";
+import {
+  GOOGLE_CALLBACK_PATH,
+  GOOGLE_START_PATH,
+  handleGoogleCallback,
+  handleGoogleStart,
+  type GoogleLoginEnv,
+} from "./google-login";
 import { landingPage, publicPageResponse } from "./public-pages";
 
 const PRIVATE_HEADERS = { "cache-control": "private, no-store" };
@@ -23,7 +30,7 @@ function hasAccessToken(request: Request): boolean {
 // Called before routing, including API and image requests. Returning null allows
 // a request through only after Access and the app session identify the same owner
 // (or, when brandedLoginEnabled is on, after validating the app session cookie).
-export async function handleAccessAuth(request: Request, env: AccessEnv & BrandedLoginEnv): Promise<Response | null> {
+export async function handleAccessAuth(request: Request, env: AccessEnv & BrandedLoginEnv & GoogleLoginEnv): Promise<Response | null> {
   const url = new URL(request.url);
   const auth = getAuthConfig();
   if (url.pathname === "/auth/login") {
@@ -41,6 +48,22 @@ export async function handleAccessAuth(request: Request, env: AccessEnv & Brande
     if (url.pathname === LOGIN_VERIFY_PATH) {
       if (!auth.sessionSecret) return error("Sign-in is not configured.", 503);
       return handleBrandedLoginVerify(request, auth.sessionSecret);
+    }
+    if (auth.googleLoginEnabled) {
+      if (url.pathname === GOOGLE_START_PATH) {
+        if (request.method !== "GET") {
+          return new Response(null, { status: 405, headers: { ...PRIVATE_HEADERS, allow: "GET" } });
+        }
+        if (!auth.sessionSecret) return error("Sign-in is not configured.", 503);
+        return handleGoogleStart(request, env, auth.sessionSecret);
+      }
+      if (url.pathname === GOOGLE_CALLBACK_PATH) {
+        if (request.method !== "GET") {
+          return new Response(null, { status: 405, headers: { ...PRIVATE_HEADERS, allow: "GET" } });
+        }
+        if (!auth.sessionSecret) return error("Sign-in is not configured.", 503);
+        return handleGoogleCallback(request, env, auth.sessionSecret);
+      }
     }
   }
   if (url.pathname === "/auth/logout") {

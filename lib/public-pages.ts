@@ -77,6 +77,10 @@ section{padding:36px 0}h2{font-size:1.6rem;letter-spacing:-.5px;margin:0 0 18px}
 .code-input{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.4rem;letter-spacing:.35em;text-align:center}
 .btn-submit{width:100%;border:0;cursor:pointer;font:inherit;font-weight:650;background:var(--green);color:#fff;padding:13px 20px;border-radius:11px}
 .btn-submit:hover{background:var(--green-2)}.btn-submit:focus-visible{outline:3px solid var(--green-2);outline-offset:3px}
+.auth-divider{display:flex;align-items:center;gap:12px;margin:18px 0;color:var(--muted);font-size:.86rem}
+.auth-divider::before,.auth-divider::after{content:"";flex:1;height:1px;background:var(--line)}
+.btn-google{display:flex;align-items:center;justify-content:center;width:100%;text-decoration:none;font:inherit;font-weight:650;color:var(--ink);background:#fff;border:1px solid #cbd7cd;padding:12px 20px;border-radius:11px}
+.btn-google:hover{background:var(--paper);border-color:var(--green-2)}.btn-google:focus-visible{outline:3px solid var(--green-2);outline-offset:3px}
 .notice{background:var(--green-soft);border:1px solid #c3dbce;color:var(--ink);border-radius:12px;padding:13px 15px;font-size:.95rem;margin-bottom:18px}
 .alert-error{background:#fdf1ed;border:1px solid #eabfb0;color:#7a2e14;border-radius:12px;padding:13px 15px;font-size:.95rem;margin-bottom:18px}
 .login-links{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;margin-top:16px;font-size:.92rem;color:var(--muted)}
@@ -160,11 +164,16 @@ export function privacyPage(): string {
 </main>`, "A private, invite-only tracker for your and your family's US immigration dates and documents.");
 }
 
+export const GOOGLE_LOGIN_ERROR_CODE = "google";
+export const UNIFORM_GOOGLE_LOGIN_ERROR =
+  "Unable to sign in with Google. Please try again or sign in with an email code.";
+
 export type BrandedLoginPageOptions = {
   step?: "email" | "verify";
   email?: string;
   notice?: string;
   error?: string;
+  googleLogin?: boolean;
 };
 
 export function brandedLoginPage(options: BrandedLoginPageOptions = {}): string {
@@ -172,18 +181,21 @@ export function brandedLoginPage(options: BrandedLoginPageOptions = {}): string 
   const safeEmail = options.email ? escapeHtml(options.email) : "";
   const noticeHtml = options.notice ? `<div class="notice" role="status">${escapeHtml(options.notice)}</div>` : "";
   const errorHtml = options.error ? `<div class="alert-error" role="alert">${escapeHtml(options.error)}</div>` : "";
+  const googleHtml = options.googleLogin
+    ? `\n<div class="auth-divider" role="separator"><span>or</span></div>\n<a class="btn-google" href="/auth/google/start">Continue with Google</a>`
+    : "";
 
   const formHtml = step === "verify"
     ? `<form method="post" action="/auth/login/verify">
 <div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" autocomplete="email" value="${safeEmail}" placeholder="you@example.com" required></div>
 <div class="field"><label for="code">6-digit sign-in code</label><input id="code" name="code" class="code-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" required autofocus></div>
 <button class="btn-submit" type="submit">Verify and sign in</button>
-</form>
+</form>${googleHtml}
 <div class="login-links"><a href="/auth/login">Request a new code</a><a href="${ACCESS_REQUEST_HREF}">Need an invite?</a></div>`
     : `<form method="post" action="/auth/login/code">
 <div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" autocomplete="email" value="${safeEmail}" placeholder="you@example.com" required autofocus></div>
 <button class="btn-submit" type="submit">Send sign-in code</button>
-</form>
+</form>${googleHtml}
 <div class="login-links"><a href="/auth/login?step=verify">Already have a code?</a><a href="${ACCESS_REQUEST_HREF}">Request access</a></div>`;
 
   return page("Sign in · Immigrant OS", `<main class="wrap"><div class="login-shell">

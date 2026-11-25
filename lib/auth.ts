@@ -13,12 +13,14 @@ export type AuthConfig = {
   sessionCookieName: string;
   sessionTtlSeconds: number;
   brandedLoginEnabled: boolean;
+  googleLoginEnabled: boolean;
 };
 
 type InjectedAuthConfig = {
   authMode?: string;
   sessionSecret?: string;
   brandedLoginEnabled?: boolean | string;
+  googleLoginEnabled?: boolean | string;
 };
 
 export function getAuthConfig(): AuthConfig {
@@ -28,12 +30,14 @@ export function getAuthConfig(): AuthConfig {
   const authMode = injected?.authMode ?? import.meta.env.VITE_AUTH_MODE ?? "dispatch";
   const sessionSecret = injected?.sessionSecret ?? import.meta.env.VITE_SESSION_SECRET ?? null;
   const brandedLoginRaw = injected?.brandedLoginEnabled ?? import.meta.env.VITE_BRANDED_LOGIN_ENABLED;
+  const googleLoginRaw = injected?.googleLoginEnabled ?? import.meta.env.VITE_GOOGLE_LOGIN_ENABLED;
   return {
     authMode: authMode === "session" ? "session" : "dispatch",
     sessionSecret: typeof sessionSecret === "string" && sessionSecret.length >= 32 ? sessionSecret : null,
     sessionCookieName: SESSION_COOKIE_NAME,
     sessionTtlSeconds: SESSION_TTL_SECONDS,
     brandedLoginEnabled: brandedLoginRaw === true || brandedLoginRaw === "true",
+    googleLoginEnabled: googleLoginRaw === true || googleLoginRaw === "true",
   };
 }
 

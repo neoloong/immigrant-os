@@ -8,13 +8,15 @@ import { handleAgentTokens } from "../lib/agent-tokens";
 import { agentDiscovery, agentGuide } from "../lib/agent-onboarding";
 import type { AccessEnv } from "../lib/access-jwt";
 import type { BrandedLoginEnv } from "../lib/branded-login";
+import type { GoogleLoginEnv } from "../lib/google-login";
 import { privacyPage, publicPageResponse } from "../lib/public-pages";
 
-interface Env extends AccessEnv, BrandedLoginEnv {
+interface Env extends AccessEnv, BrandedLoginEnv, GoogleLoginEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DB: D1BindingLike;
   BUCKET: R2BindingLike;
   AGENT_MCP_ENABLED?: string;
+  GOOGLE_LOGIN_ENABLED?: string;
   AUTH_MODE?: string;
   SESSION_SECRET?: string;
   IMAGES: {
@@ -43,11 +45,20 @@ const worker = {
       __IMMIGRANT_SITE_BINDINGS__?: Pick<Env, "DB" | "BUCKET">;
     }).__IMMIGRANT_SITE_BINDINGS__ = { DB: env.DB, BUCKET: env.BUCKET };
     (globalThis as typeof globalThis & {
-      __IMMIGRANT_AUTH_CONFIG__?: { authMode?: string; sessionSecret?: string; brandedLoginEnabled?: boolean };
+      __IMMIGRANT_AUTH_CONFIG__?: {
+        authMode?: string;
+        sessionSecret?: string;
+        brandedLoginEnabled?: boolean;
+        googleLoginEnabled?: boolean;
+      };
     }).__IMMIGRANT_AUTH_CONFIG__ = {
       authMode: env.AUTH_MODE,
       sessionSecret: env.SESSION_SECRET,
       brandedLoginEnabled: env.BRANDED_LOGIN_ENABLED === "true",
+      googleLoginEnabled:
+        env.GOOGLE_LOGIN_ENABLED === "true"
+        && Boolean(env.GOOGLE_CLIENT_ID?.trim())
+        && Boolean(env.GOOGLE_CLIENT_SECRET?.trim()),
     };
     const url = new URL(request.url);
 
