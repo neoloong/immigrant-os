@@ -239,7 +239,7 @@ test("agent token lifecycle, MCP protocol, account isolation and compliance", as
           if (action.id.startsWith("universal-passport-expiry:")) {
             assert.equal(action.source.url, "https://travel.state.gov/content/travel/en/us-visas/tourism-visit/visitor.html");
           }
-          assert.match(new URL(action.source.url).hostname, /^(www\.uscis\.gov|travel\.state\.gov)$/);
+          assert.match(new URL(action.source.url).hostname, /^(www\.uscis\.gov|travel\.state\.gov|www\.usa\.gov)$/);
           assert.doesNotMatch(JSON.stringify(action), /you (are eligible|qualify|should file)|your earliest filing date is|legal advice is/i);
         }
       }

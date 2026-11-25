@@ -48,10 +48,10 @@ const SOURCES = {
     url: "https://travel.state.gov/content/travel/en/legal/visa-law0/visa-bulletin.html",
     ruleVersion: "Current monthly bulletin required",
   },
-  greenCard: {
-    label: "USCIS: Green Card Processes and Procedures",
-    url: "https://www.uscis.gov/green-card/green-card-processes-and-procedures",
-    ruleVersion: "Official reference · check current instructions",
+  caseStatus: {
+    label: "USAGov: Check immigration case status",
+    url: "https://www.usa.gov/immigration-case-status",
+    ruleVersion: "Official case-status guidance",
   },
   i90: {
     label: "USCIS: Form I-90",
@@ -174,13 +174,13 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
     });
     add({
       id: "gc-case-receipts",
-      title: "Add every USCIS receipt to your case tracker",
-      description: "Keep the I-140, I-485, I-765, I-131, and dependent cases separate so a change in one does not hide another.",
+      title: "Track the USCIS receipts you already have",
+      description: "Add each receipt you want to track as a separate case in this app. This is an organization suggestion, not a list of forms to file. Use the official case-status guidance to check a receipt with USCIS.",
       dueDate: null,
       severity: "planning",
       confidence: "needs-review",
       basis: ["Green-card journey selected"],
-      source: SOURCES.greenCard,
+      source: SOURCES.caseStatus,
     });
   }
 
