@@ -38,10 +38,10 @@ const SOURCES = {
     url: "https://www.uscis.gov/i-765",
     ruleVersion: "Official reference · check current instructions",
   },
-  h1b: {
-    label: "USCIS: H-1B Specialty Occupations",
-    url: "https://www.uscis.gov/working-in-the-united-states/h-1b-specialty-occupations",
-    ruleVersion: "Official reference · check current instructions",
+  visaExpiration: {
+    label: "Department of State: Visa expiration and admission records",
+    url: "https://travel.state.gov/content/travel/en/us-visas/visa-information-resources/visa-expiration-date.html",
+    ruleVersion: "Background reference; reminder timing is an app preference",
   },
   visaBulletin: {
     label: "Department of State: Visa Bulletin",
@@ -121,23 +121,23 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
     if (profile.i94ExpirationDate) {
       add({
         id: "h1b-extension-planning",
-        title: "Begin employer extension planning",
-        description: "This six-month planning reminder is not a legal filing deadline. Confirm timing with the petitioning employer or counsel.",
+        title: "Review your saved I-94 date",
+        description: "Immigrant OS sets this planning reminder six months before the I-94 date you entered. This is an app preference, not a USCIS filing window or deadline. Discuss next steps with qualified counsel; involve your employer for employment-related questions.",
         dueDate: addMonths(profile.i94ExpirationDate, -6),
         severity: "important",
         confidence: "preliminary",
-        basis: [`I-94 ends: ${formatDate(profile.i94ExpirationDate)}`, "Planning reminder set six months earlier"],
-        source: SOURCES.h1b,
+        basis: [`Saved I-94 date: ${formatDate(profile.i94ExpirationDate)}`, "App planning preference: six months before the saved date"],
+        source: SOURCES.visaExpiration,
       });
       add({
         id: "h1b-i94-end",
-        title: "I-94 authorized stay ends",
-        description: "The visa stamp is an entry document; it is not a substitute for checking the authorized stay shown on the latest I-94 and approval records.",
+        title: "Saved I-94 admit-until date",
+        description: "This is the I-94 date you entered. Review your latest I-94 and any USCIS notices with qualified counsel. This tracker does not determine your authorized stay.",
         dueDate: profile.i94ExpirationDate,
         severity: "critical",
         confidence: "needs-review",
         basis: [`I-94 admit-until date: ${formatDate(profile.i94ExpirationDate)}`],
-        source: SOURCES.h1b,
+        source: SOURCES.visaExpiration,
       });
     }
   }
