@@ -164,9 +164,9 @@ export function buildPlan(profile: ImmigrationProfile, completedKeys: string[] =
       id: "gc-visa-bulletin",
       title: "Review the current Visa Bulletin",
       description: profile.priorityDate
-        ? `Your saved priority date is ${formatDate(profile.priorityDate)}. Compare it with the correct employment or family category and country column; this product does not infer those missing facts. The Department of State publishes a new Visa Bulletin each month, so this reminder returns on the 1st of every month.`
-        : "Add your priority date, preference category, and chargeability country before any personalized availability check. The Department of State publishes a new Visa Bulletin each month, so this reminder returns on the 1st of every month.",
-      dueDate: firstDayNextMonth(),
+        ? `Your saved priority date is ${formatDate(profile.priorityDate)}. Open the official Visa Bulletin for a general review. This tracker does not collect preference category or chargeability country and does not check visa availability or filing eligibility.`
+        : "Open the official Visa Bulletin for a general review. You can save a priority date in your profile, but this tracker does not collect preference category or chargeability country and does not check visa availability or filing eligibility.",
+      dueDate: null,
       severity: "important",
       confidence: "needs-review",
       basis: profile.priorityDate ? [`Priority date: ${formatDate(profile.priorityDate)}`] : ["Priority date missing"],
@@ -273,11 +273,6 @@ function addMonths(value: string, months: number) {
   const lastDay = new Date(Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0, 12)).getUTCDate();
   result.setUTCDate(Math.min(day, lastDay));
   return iso(result);
-}
-
-function firstDayNextMonth() {
-  const now = new Date();
-  return iso(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 12)));
 }
 
 export function formatDate(value: string) {
