@@ -4,7 +4,12 @@
 	"webDir": "mobile/www",
 	"server": {
 		"url": "https://immigrant-os.neoloong.workers.dev",
-		"cleartext": false
+		"cleartext": false,
+		"allowNavigation": [
+			"neoloong.cloudflareaccess.com",
+			"oauth-callbacks.cloudflareaccess.com",
+			"dash.cloudflare.com"
+		]
 	},
 	"backgroundColor": "#f8f9f6"
 }
